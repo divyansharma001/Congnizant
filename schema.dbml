@@ -1,0 +1,163 @@
+// ============================================================
+// HyperPersona — full data model
+// Paste into https://dbdiagram.io/d to render the diagram.
+//
+// Color legend (header bar):
+//   blue   → DynamoDB    (durable structured records)
+//   green  → OpenSearch  (vector embeddings, semantic memory)
+//   red    → Redis       (hot ephemeral state)
+//   orange → S3          (cold trace archive)
+//   purple → SQLite      (per-job agent execution log, inside AgentCore)
+// ============================================================
+
+
+// ─── DynamoDB (current — Phases 2/8) ─────────────────────────
+
+Table customer_events [headercolor: #1E40AF] {
+  PK varchar [pk, note: "CUSTOMER#{customer_id}"]
+  SK varchar [pk, note: "EVENT#{created_at}#{event_id}"]
+  customer_id varchar
+  event_id varchar
+  event_type varchar [note: "page_view | add_to_cart | purchase | return | search"]
+  payload json
+  status varchar [note: "pending → processing → processed | failed"]
+  consent_scope "set<varchar>"
+  created_at timestamp
+
+  Note: '''Behavior events. GSI status-index (status, created_at) for finding pending/failed work.'''
+}
+
+Table customer_consent [headercolor: #1E40AF] {
+  PK varchar [pk, note: "CUSTOMER#{customer_id}"]
+  SK varchar [pk, note: "CONSENT (fixed)"]
+  customer_id varchar
+  scopes "set<varchar>" [note: "personalization | analytics | marketing"]
+  data_retention_days int [default: 90]
+  last_updated timestamp
+
+  Note: '''One row per customer. Privacy gate — workers refuse jobs without matching consent.'''
+}
+
+Table jobs [headercolor: #1E40AF] {
+  PK varchar [pk, note: "JOB#{job_id}"]
+  SK varchar [pk, note: "META (fixed)"]
+  job_id varchar
+  job_type varchar [note: "process_event | generate_recommendation | batch_import"]
+  payload json
+  status varchar [note: "queued → running → completed | failed"]
+  created_at timestamp
+  completed_at timestamp [null]
+  error text [null]
+
+  Note: '''Async work bookkeeping. GSI status-index (status, created_at) for observability and retry sweeps.'''
+}
+
+
+// ─── OpenSearch vector collections (Phase 7) ─────────────────
+
+Table customer_facts [headercolor: #15803D] {
+  id varchar [pk]
+  customer_id varchar
+  text text [note: "atomic fact, e.g. 'prefers trail running'"]
+  vector "float[1024]" [note: "Titan embedding"]
+  source_event varchar [note: "event_id this fact was extracted from"]
+  timestamp timestamp
+  polarity int [note: "-1 negative | 0 neutral | 1 positive"]
+
+  Note: '''Long-term memory. ACE-ranked at retrieval (recency × similarity, conflict detection).'''
+}
+
+Table behavior_embeddings [headercolor: #15803D] {
+  id varchar [pk, note: "= event_id"]
+  customer_id varchar
+  text text [note: "redacted event description"]
+  vector "float[1024]"
+  timestamp timestamp
+
+  Note: '''Mid-term memory. Raw events embedded for similarity search.'''
+}
+
+Table session_summaries [headercolor: #15803D] {
+  id varchar [pk]
+  customer_id varchar
+  text text
+  vector "float[1024]"
+  timestamp timestamp
+
+  Note: '''Short-term memory. Rolled up periodically from recent session activity.'''
+}
+
+
+// ─── Redis (ephemeral) ───────────────────────────────────────
+
+Table redis_jobs_pending [headercolor: #B91C1C] {
+  key varchar [pk, note: "jobs:pending (list)"]
+  value json [note: "Job JSON, LPUSH server / BRPOP worker"]
+
+  Note: '''Worker inbox. Server pushes, worker pulls.'''
+}
+
+Table redis_session [headercolor: #B91C1C] {
+  key varchar [pk, note: "session:{customer_id}"]
+  value json
+  ttl_seconds int [note: "rolling, ~30 min"]
+
+  Note: '''Hot session state. Rolled into session_summaries periodically.'''
+}
+
+Table redis_offer_cache [headercolor: #B91C1C] {
+  key varchar [pk, note: "offer:{customer_id}:{hash(context)}"]
+  value json
+  ttl_seconds int [default: 300]
+
+  Note: '''Recommendation response cache. 5-min TTL.'''
+}
+
+Table redis_profile_hot [headercolor: #B91C1C] {
+  key varchar [pk, note: "profile:{customer_id}:hot"]
+  value json
+
+  Note: '''Frequently-read profile fields. Reduces DynamoDB load on the hot path.'''
+}
+
+
+// ─── S3 cold trace archive (Phase 9) ─────────────────────────
+
+Table s3_traces [headercolor: #C2410C] {
+  key varchar [pk, note: "traces/{YYYY}/{MM}/{DD}/traces_{ts}.db"]
+  bucket varchar [note: "hyperpersona-traces"]
+  payload binary [note: "SQLite database file"]
+  uploaded_at timestamp
+
+  Note: '''SQLite trace files synced post-job. Read on demand by GET /traces/{job_id}.'''
+}
+
+
+// ─── SQLite per-job traces (inside AgentCore microVM) ────────
+
+Table sqlite_traces [headercolor: #6B21A8] {
+  id integer [pk, increment]
+  job_id varchar
+  agent_name varchar [note: "supervisor | privacy | analyzer | recommender | verifier"]
+  step varchar
+  input json
+  output json
+  duration_ms float
+  timestamp timestamp
+  status varchar
+
+  Note: '''Append-only log of agent steps. Whole .db is uploaded to S3 on job completion.'''
+}
+
+
+// ─── Logical relationships (NOT enforced — NoSQL) ────────────
+
+Ref: customer_events.customer_id > customer_consent.customer_id
+Ref: behavior_embeddings.id - customer_events.event_id
+Ref: customer_facts.source_event > customer_events.event_id
+Ref: customer_facts.customer_id > customer_consent.customer_id
+Ref: behavior_embeddings.customer_id > customer_consent.customer_id
+Ref: session_summaries.customer_id > customer_consent.customer_id
+Ref: sqlite_traces.job_id > jobs.job_id
+Ref: s3_traces.key > jobs.job_id
+Ref: redis_jobs_pending.value > jobs.job_id

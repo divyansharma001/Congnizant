@@ -1,0 +1,129 @@
+"""DynamoDB helper used by both server and worker.
+
+Wraps the boto3 resource API so callers pass dicts in/out and don't deal with
+the low-level type-marshaled format. Empty Python sets are dropped before
+writes because DynamoDB rejects empty StringSets.
+"""
+
+import boto3
+from boto3.dynamodb.conditions import Key
+
+from .constants import (
+    TABLE_CUSTOMER_CONSENT,
+    TABLE_CUSTOMER_EVENTS,
+    TABLE_JOBS,
+)
+
+
+def _strip_empty_sets(item: dict) -> dict:
+    return {k: v for k, v in item.items() if not (isinstance(v, set) and not v)}
+
+
+class DynamoClient:
+    def __init__(self, endpoint: str, region: str = "us-east-1"):
+        self.resource = boto3.resource(
+            "dynamodb",
+            endpoint_url=endpoint,
+            region_name=region,
+        )
+
+    def table(self, name: str):
+        return self.resource.Table(name)
+
+    # --- customer_events ---------------------------------------------------
+
+    def put_event(self, event: dict) -> None:
+        item = _strip_empty_sets({
+            "PK": f"CUSTOMER#{event['customer_id']}",
+            "SK": f"EVENT#{event['created_at']}#{event['event_id']}",
+            **event,
+        })
+        self.table(TABLE_CUSTOMER_EVENTS).put_item(Item=item)
+
+    def get_event(self, customer_id: str, created_at: str, event_id: str) -> dict | None:
+        resp = self.table(TABLE_CUSTOMER_EVENTS).get_item(
+            Key={
+                "PK": f"CUSTOMER#{customer_id}",
+                "SK": f"EVENT#{created_at}#{event_id}",
+            }
+        )
+        return resp.get("Item")
+
+    def query_events(self, customer_id: str) -> list[dict]:
+        resp = self.table(TABLE_CUSTOMER_EVENTS).query(
+            KeyConditionExpression=Key("PK").eq(f"CUSTOMER#{customer_id}")
+        )
+        return resp.get("Items", [])
+
+    def update_event_status(
+        self,
+        customer_id: str,
+        created_at: str,
+        event_id: str,
+        status: str,
+    ) -> None:
+        self.table(TABLE_CUSTOMER_EVENTS).update_item(
+            Key={
+                "PK": f"CUSTOMER#{customer_id}",
+                "SK": f"EVENT#{created_at}#{event_id}",
+            },
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": status},
+        )
+
+    # --- customer_consent --------------------------------------------------
+
+    def put_consent(self, consent: dict) -> None:
+        item = _strip_empty_sets({
+            "PK": f"CUSTOMER#{consent['customer_id']}",
+            "SK": "CONSENT",
+            **consent,
+        })
+        self.table(TABLE_CUSTOMER_CONSENT).put_item(Item=item)
+
+    def get_consent(self, customer_id: str) -> dict | None:
+        resp = self.table(TABLE_CUSTOMER_CONSENT).get_item(
+            Key={"PK": f"CUSTOMER#{customer_id}", "SK": "CONSENT"}
+        )
+        return resp.get("Item")
+
+    # --- jobs --------------------------------------------------------------
+
+    def put_job(self, job: dict) -> None:
+        item = _strip_empty_sets({
+            "PK": f"JOB#{job['job_id']}",
+            "SK": "META",
+            **job,
+        })
+        self.table(TABLE_JOBS).put_item(Item=item)
+
+    def get_job(self, job_id: str) -> dict | None:
+        resp = self.table(TABLE_JOBS).get_item(
+            Key={"PK": f"JOB#{job_id}", "SK": "META"}
+        )
+        return resp.get("Item")
+
+    def update_job_status(
+        self,
+        job_id: str,
+        status: str,
+        completed_at: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        update_parts = ["#s = :s"]
+        names = {"#s": "status"}
+        values = {":s": status}
+        if completed_at:
+            update_parts.append("completed_at = :c")
+            values[":c"] = completed_at
+        if error:
+            update_parts.append("#e = :e")
+            names["#e"] = "error"
+            values[":e"] = error
+        self.table(TABLE_JOBS).update_item(
+            Key={"PK": f"JOB#{job_id}", "SK": "META"},
+            UpdateExpression="SET " + ", ".join(update_parts),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )

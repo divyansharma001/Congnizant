@@ -12,6 +12,7 @@ services:
     volumes:
       - ./server/src:/app/src
       - ./shared:/app/shared
+      - ./scripts:/app/scripts
     environment:
       REDIS_URL: redis://redis:6379
       DYNAMODB_ENDPOINT: http://dynamodb-local:8000
