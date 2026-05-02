@@ -1,4 +1,4 @@
-.PHONY: up down logs build server worker restart-worker setup-db scan-events scan-jobs scan-consent peek-queue clean ps
+.PHONY: up down logs build server worker restart-worker setup-db scan-events scan-jobs scan-consent peek-queue test-bedrock clean ps
 
 up:
 	docker compose up -d --build
@@ -37,6 +37,10 @@ scan-consent:
 
 peek-queue:
 	docker exec hyperpersona-redis-1 redis-cli LRANGE jobs:pending 0 -1
+
+# Phase 4 — Bedrock wrapper sanity test (mock or real, depending on BEDROCK_MODE)
+test-bedrock:
+	docker compose exec worker python /app/scripts/test_bedrock.py
 
 ps:
 	docker compose ps
