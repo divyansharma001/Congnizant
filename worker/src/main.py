@@ -1,9 +1,10 @@
 import logging
-import time
 
-import redis
+from shared.dynamo import DynamoClient
+from shared.queue import make_redis, pop_job
 
 from .config import settings
+from .job_handler import dispatch
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,14 +14,23 @@ log = logging.getLogger("worker")
 
 
 def main() -> None:
-    client = redis.from_url(settings.redis_url, decode_responses=True)
-    client.ping()
+    redis_client = make_redis(settings.redis_url)
+    dynamo = DynamoClient(endpoint=settings.dynamodb_endpoint, region=settings.aws_region)
+
+    redis_client.ping()
     log.info("worker started, waiting for jobs (redis=%s)", settings.redis_url)
 
-    # Phase 3 will replace this idle loop with BRPOP on jobs:pending.
     while True:
-        time.sleep(30)
-        log.info("worker idle heartbeat")
+        try:
+            payload = pop_job(redis_client, timeout=0)
+            if payload is None:
+                continue
+            dispatch(payload, dynamo)
+        except KeyboardInterrupt:
+            log.info("worker shutting down")
+            break
+        except Exception:
+            log.exception("worker loop error — continuing")
 
 
 if __name__ == "__main__":
