@@ -751,6 +751,11 @@ curl "http://localhost:8000/recommend?customer_id=cust_1&context=looking+for+out
 | DELETE | /customer/{customer_id} | Right-to-delete (GDPR) | API key |
 | GET | /jobs/{job_id} | Get job status | API key |
 | GET | /traces/{job_id} | Get agent traces | API key |
+| GET | /catalog/products/{slug}/reviews | Paginated product reviews (PDP) | API key / session |
+| POST | /catalog/products/{slug}/reviews | Submit shopper review (rating + text) | Auth |
+| PUT | /catalog/products/{slug}/reviews/{id}/helpful | Mark review helpful or not helpful | Auth |
+
+Also wire `POST /events` ingestion for review telemetry (`product_reviews_viewed`, `product_reviews_page_loaded`, `product_review_submitted`, `product_review_engagement`) so workers can treat UGC engagement like other behavioral signals. See `apps/web/API_REQUIREMENTS.md` for full contract text.
 
 **Files to create/modify:**
 
