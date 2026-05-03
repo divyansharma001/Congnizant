@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     opensearch_host: str = "opensearch"
     opensearch_port: int = 9200
 
+    # Trace SQLite path — shared volume between worker and server
+    traces_db_path: str = "/app/traces/agent_traces.db"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

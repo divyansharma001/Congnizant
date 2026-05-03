@@ -6,6 +6,7 @@ the worker container and are wiped on container restart.
 """
 
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -29,8 +30,9 @@ CREATE INDEX IF NOT EXISTS idx_traces_job ON traces(job_id);
 
 
 class TraceLogger:
-    def __init__(self, db_path: str = "/tmp/agent_traces.db") -> None:
+    def __init__(self, db_path: str = "/app/traces/agent_traces.db") -> None:
         self.db_path = db_path
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._lock = threading.Lock()
         self._init_db()
 

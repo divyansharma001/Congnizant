@@ -31,7 +31,7 @@ def main() -> None:
         host=settings.opensearch_host,
         port=settings.opensearch_port,
     )
-    tracer = TraceLogger("/tmp/agent_traces.db")
+    tracer = TraceLogger(settings.traces_db_path)
     supervisor = Supervisor(dynamo=dynamo, bedrock=bedrock, vectors=vectors, tracer=tracer)
 
     ctx = {
@@ -40,6 +40,7 @@ def main() -> None:
         "vectors": vectors,
         "tracer": tracer,
         "supervisor": supervisor,
+        "redis": redis_client,
     }
 
     redis_client.ping()

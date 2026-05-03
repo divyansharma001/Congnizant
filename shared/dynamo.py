@@ -55,6 +55,23 @@ class DynamoClient:
         )
         return resp.get("Items", [])
 
+    def delete_event(self, customer_id: str, created_at: str, event_id: str) -> None:
+        self.table(TABLE_CUSTOMER_EVENTS).delete_item(
+            Key={
+                "PK": f"CUSTOMER#{customer_id}",
+                "SK": f"EVENT#{created_at}#{event_id}",
+            }
+        )
+
+    def delete_all_events_for_customer(self, customer_id: str) -> int:
+        """Delete every event for a customer. Returns count deleted."""
+        events = self.query_events(customer_id)
+        for event in events:
+            self.table(TABLE_CUSTOMER_EVENTS).delete_item(
+                Key={"PK": event["PK"], "SK": event["SK"]}
+            )
+        return len(events)
+
     def update_event_status(
         self,
         customer_id: str,
@@ -87,6 +104,16 @@ class DynamoClient:
             Key={"PK": f"CUSTOMER#{customer_id}", "SK": "CONSENT"}
         )
         return resp.get("Item")
+
+    def delete_consent(self, customer_id: str) -> bool:
+        """Returns True if a consent record was deleted, False if not found."""
+        existing = self.get_consent(customer_id)
+        if not existing:
+            return False
+        self.table(TABLE_CUSTOMER_CONSENT).delete_item(
+            Key={"PK": f"CUSTOMER#{customer_id}", "SK": "CONSENT"}
+        )
+        return True
 
     # --- jobs --------------------------------------------------------------
 

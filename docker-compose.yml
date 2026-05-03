@@ -13,12 +13,15 @@ services:
       - ./server/src:/app/src
       - ./shared:/app/shared
       - ./scripts:/app/scripts
+      - traces:/app/traces
     environment:
       REDIS_URL: redis://redis:6379
       DYNAMODB_ENDPOINT: http://dynamodb-local:8000
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
+      API_KEY: ${API_KEY:-test-key}
+      TRACES_DB_PATH: /app/traces/agent_traces.db
     depends_on:
       - redis
       - dynamodb-local
@@ -33,9 +36,11 @@ services:
       - ./worker/src:/app/src
       - ./shared:/app/shared
       - ./scripts:/app/scripts
+      - traces:/app/traces
     environment:
       REDIS_URL: redis://redis:6379
       DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      TRACES_DB_PATH: /app/traces/agent_traces.db
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-local}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-local}
@@ -89,3 +94,6 @@ services:
     ports:
       - "9200:9200"
     restart: unless-stopped
+
+volumes:
+  traces:

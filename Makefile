@@ -1,4 +1,4 @@
-.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools show-trace clean ps
+.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools test-recommend test-privacy show-trace clean ps
 
 up:
 	docker compose up -d --build
@@ -61,6 +61,17 @@ test-tools:
 # Phase 6 — Show the agent trace for one job: make show-trace JOB=<job_id>
 show-trace:
 	docker compose exec worker python /app/scripts/show_trace.py $(JOB)
+
+# Phase 8 — Hit GET /recommend: make test-recommend CUST=cust_1 CTX="outdoor gear"
+test-recommend:
+	curl -s -H "X-API-Key: test-key" \
+	  --data-urlencode "customer_id=$(CUST)" \
+	  --data-urlencode "context=$(CTX)" \
+	  -G "http://localhost:8000/recommend"
+
+# Phase 11 — End-to-end privacy + GDPR delete verification
+test-privacy:
+	docker compose exec server python /app/scripts/test_privacy.py
 
 ps:
 	docker compose ps
