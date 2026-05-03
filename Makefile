@@ -1,4 +1,4 @@
-.PHONY: up down logs build server worker restart-worker setup-db seed-consent scan-events scan-jobs scan-consent peek-queue test-bedrock test-tools show-trace clean ps
+.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools show-trace clean ps
 
 up:
 	docker compose up -d --build
@@ -25,6 +25,15 @@ restart-worker:
 # Phase 2 — DynamoDB tables and queue inspection
 setup-db:
 	docker compose exec server python /app/scripts/setup_dynamodb.py
+
+# Phase 7 — OpenSearch indexes and vector inspection
+setup-opensearch:
+	docker compose exec worker python /app/scripts/setup_opensearch.py
+
+# usage: make scan-vectors COLL=customer-facts CUST=cust_1
+# CUST is optional; omit it to scan everything in the collection
+scan-vectors:
+	docker compose exec worker python /app/scripts/scan_vectors.py $(COLL) $(CUST)
 
 scan-events:
 	docker compose exec server python /app/scripts/scan.py customer_events

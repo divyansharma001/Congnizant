@@ -43,9 +43,13 @@ services:
       BEDROCK_REGION: ${BEDROCK_REGION:-us-east-1}
       BEDROCK_TEXT_MODEL: ${BEDROCK_TEXT_MODEL:-anthropic.claude-sonnet-4-5-20250929-v1:0}
       BEDROCK_EMBED_MODEL: ${BEDROCK_EMBED_MODEL:-amazon.titan-embed-text-v2:0}
+      VECTOR_MODE: ${VECTOR_MODE:-opensearch}
+      OPENSEARCH_HOST: ${OPENSEARCH_HOST:-opensearch}
+      OPENSEARCH_PORT: ${OPENSEARCH_PORT:-9200}
     depends_on:
       - redis
       - dynamodb-local
+      - opensearch
     restart: unless-stopped
 
   redis:
@@ -62,4 +66,26 @@ services:
     ports:
       - "8001:8000"
     command: -jar DynamoDBLocal.jar -sharedDb -inMemory
+    restart: unless-stopped
+
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    container_name: hyperpersona-opensearch-1
+    environment:
+      cluster.name: hyperpersona-cluster
+      node.name: hyperpersona-node
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
     restart: unless-stopped

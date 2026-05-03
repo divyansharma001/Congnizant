@@ -3,7 +3,7 @@ import logging
 from shared.bedrock import make_bedrock_client
 from shared.dynamo import DynamoClient
 from shared.queue import make_redis, pop_job
-from shared.vector_store import InMemoryVectorStore
+from shared.vector_store import make_vector_store
 
 from .agents.supervisor import Supervisor
 from .config import settings
@@ -26,7 +26,11 @@ def main() -> None:
         text_model=settings.bedrock_text_model,
         embed_model=settings.bedrock_embed_model,
     )
-    vectors = InMemoryVectorStore()
+    vectors = make_vector_store(
+        mode=settings.vector_mode,
+        host=settings.opensearch_host,
+        port=settings.opensearch_port,
+    )
     tracer = TraceLogger("/tmp/agent_traces.db")
     supervisor = Supervisor(dynamo=dynamo, bedrock=bedrock, vectors=vectors, tracer=tracer)
 
@@ -39,8 +43,10 @@ def main() -> None:
     }
 
     redis_client.ping()
-    log.info("worker started, waiting for jobs (redis=%s, bedrock=%s)",
-             settings.redis_url, settings.bedrock_mode)
+    log.info(
+        "worker started, waiting for jobs (redis=%s, bedrock=%s, vectors=%s)",
+        settings.redis_url, settings.bedrock_mode, settings.vector_mode,
+    )
 
     while True:
         try:
