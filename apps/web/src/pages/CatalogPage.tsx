@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 
@@ -6,11 +7,24 @@ import {
   CatalogProductGridSkeleton,
   CatalogToolbarSkeleton,
 } from "@/features/catalog/components/CatalogSkeletons";
+import { ListingEmptyFiltered } from "@/features/catalog/components/ListingEmptyFiltered";
 import { ProductGrid } from "@/features/catalog/components/ProductGrid";
 import { useTrackEvent } from "@/features/events/useTrackEvent";
+import { useCatalogFacets } from "@/features/catalog/hooks/useCatalogFacets";
+import { useFacetStripBusyForScopeChange } from "../features/catalog/hooks/useFacetStripBusyForScopeChange";
 import { useProductSearch } from "@/features/catalog/hooks/useProductSearch";
 import { apiClient } from "@/shared/api/client";
 import { tw } from "@/shared/ui/tw";
+
+/** Static hero — filter/sort URL updates do not re-render this subtree. */
+const CatalogPageIntro = memo(function CatalogPageIntro() {
+  return (
+    <header className="max-w-3xl">
+      <p className={`mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.18em] ${tw.muted}`}>Catalog</p>
+      <h1 className={`${tw.storyTitle} max-w-[18ch]`}>Browse editorial product surfaces the way a real shopper would.</h1>
+    </header>
+  );
+});
 
 export function CatalogPage() {
   const [params, setParams] = useSearchParams();
@@ -21,6 +35,7 @@ export function CatalogPage() {
   const vertical = params.get("vertical") ?? "";
   const freeDelivery = params.get("freeDelivery") === "true" ? "true" : "";
   const query = useProductSearch({ category, sort, page, vertical, freeDelivery });
+  const facetsQuery = useCatalogFacets({ category, vertical, freeDelivery });
   const categoriesQuery = useQuery({
     queryKey: ["categories"],
     queryFn: apiClient.getCategories,
@@ -100,6 +115,23 @@ export function CatalogPage() {
     setParams(next);
   };
 
+  const clearFacetFilters = () => {
+    const next = new URLSearchParams(params);
+    next.delete("vertical");
+    next.delete("freeDelivery");
+    next.delete("page");
+    setParams(next);
+  };
+
+  const clearCategoryScope = () => {
+    const next = new URLSearchParams(params);
+    next.delete("category");
+    next.delete("page");
+    setParams(next);
+  };
+
+  const hasFacetFilters = Boolean(vertical) || freeDelivery === "true";
+
   const pageNum = Math.max(1, Number(page || "1"));
   const pageSize = query.data?.pageSize ?? 12;
   const total = query.data?.total ?? 0;
@@ -107,15 +139,16 @@ export function CatalogPage() {
 
   const categoriesReady = Boolean(categoriesQuery.data);
   const categoriesBusy = categoriesQuery.isPending || categoriesQuery.isLoading;
-  const productsReady = Boolean(query.data);
-  const productsBusy = query.isPending || query.isLoading;
+  /**
+   * Facet strip skeleton tracks the **facets** query (separate cache, no `sort`/`page` in key) — so sort/page never trigger it.
+   * “Loading results…” summary tracks the **products** query because it summarizes the list count.
+   */
+  const { facetFiltersBusy } = useFacetStripBusyForScopeChange(category, facetsQuery);
+  const { resultsLoading } = useFacetStripBusyForScopeChange(category, query);
 
   return (
     <div className={`${tw.stackLg} pt-8 sm:pt-10 lg:pt-12 pb-12 sm:pb-14 lg:pb-16`}>
-      <header className="max-w-3xl">
-        <p className={`mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.18em] ${tw.muted}`}>Catalog</p>
-        <h1 className={`${tw.storyTitle} max-w-[18ch]`}>Browse editorial product surfaces the way a real shopper would.</h1>       
-      </header>
+      <CatalogPageIntro />
 
       {query.isError ? (
         <p className="text-sm text-red-800/90" role="alert">
@@ -130,14 +163,15 @@ export function CatalogPage() {
           categories={categoriesQuery.data}
           activeCategory={category}
           activeSort={sort}
-          resultsLoading={productsBusy && !query.data}
+          facetFiltersBusy={facetFiltersBusy}
+          resultsLoading={resultsLoading}
           total={query.data?.total ?? 0}
           totalFiltered={query.data?.total}
           page={query.data?.page ?? 1}
           pageSize={query.data?.pageSize ?? pageSize}
           activeVertical={vertical}
           freeDeliveryOnly={freeDelivery === "true"}
-          facets={query.data?.facets}
+          facets={facetsQuery.data}
           onCategoryChange={updateCategory}
           onSortChange={updateSort}
           onVerticalChange={updateVertical}
@@ -145,13 +179,29 @@ export function CatalogPage() {
         />
       ) : null}
 
-      {!productsReady && productsBusy ? (
+      {!query.data ? (
         <CatalogProductGridSkeleton />
-      ) : query.data ? (
-        <ProductGrid products={query.data.items} />
-      ) : null}
+      ) : query.data.items.length === 0 ? (
+        <ListingEmptyFiltered
+          hasFacetFilters={hasFacetFilters}
+          hasCategoryScope={Boolean(category)}
+          onClearFacetFilters={clearFacetFilters}
+          onClearCategoryScope={clearCategoryScope}
+        />
+      ) : (
+        <div
+          aria-busy={query.isPlaceholderData && query.isFetching}
+          className={
+            query.isPlaceholderData && query.isFetching
+              ? "opacity-[0.72] transition-opacity duration-300 motion-reduce:transition-none"
+              : undefined
+          }
+        >
+          <ProductGrid products={query.data.items} />
+        </div>
+      )}
 
-      {productsReady && totalPages > 1 ? (
+      {query.data && totalPages > 1 ? (
         <nav
           className="flex flex-wrap items-center justify-center gap-4 border-t border-outline/12 pt-6 sm:pt-7"
           aria-label="Catalog pagination"

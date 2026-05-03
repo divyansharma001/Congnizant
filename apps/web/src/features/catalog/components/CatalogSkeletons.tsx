@@ -26,6 +26,28 @@ export function CatalogToolbarSkeleton() {
   );
 }
 
+/** Department + delivery facet rows while product facets reload (matches `CatalogToolbar` pill rhythm). */
+export function CatalogFacetFiltersSkeleton() {
+  return (
+    <div className="grid gap-8 sm:gap-10" aria-hidden aria-busy>
+      <div className="grid gap-3">
+        <div className={`h-3 w-28 ${pulse}`} />
+        <div className="flex flex-wrap gap-2">
+          <div className={`h-9 w-14 shrink-0 rounded-pill ${pulse}`} />
+          <div className={`h-9 w-44 max-w-[min(100%,11rem)] rounded-pill ${pulse}`} />
+          <div className={`h-9 w-40 max-w-[min(100%,10rem)] rounded-pill ${pulse}`} />
+          <div className={`h-9 w-36 max-w-[min(100%,9rem)] rounded-pill ${pulse}`} />
+          <div className={`h-9 w-32 max-w-[min(100%,8rem)] rounded-pill ${pulse}`} />
+        </div>
+      </div>
+      <div className="grid gap-3">
+        <div className={`h-3 w-24 ${pulse}`} />
+        <div className={`h-9 w-52 max-w-full rounded-pill ${pulse}`} />
+      </div>
+    </div>
+  );
+}
+
 /** Search results toolbar: sort + facet rows without category (matches `CatalogToolbar` rhythm). */
 export function SearchFiltersToolbarSkeleton() {
   return (

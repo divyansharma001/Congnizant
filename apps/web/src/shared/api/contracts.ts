@@ -194,7 +194,7 @@ export type ProductListResponse = {
   page: number;
   pageSize: number;
   personalized: boolean;
-  /** Facet counts for the current filter context (pre-pagination slice). */
+  /** @deprecated Prefer `GET /catalog/facets` — kept optional for older mocks/backends. */
   facets?: CatalogFacetGroup[];
 };
 

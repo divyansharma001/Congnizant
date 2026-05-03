@@ -1,3 +1,4 @@
+import { CatalogFacetFiltersSkeleton } from "@/features/catalog/components/CatalogSkeletons";
 import type { CatalogFacetGroup, Category } from "@/shared/api/contracts";
 import { tw } from "@/shared/ui/tw";
 
@@ -7,7 +8,9 @@ type CatalogToolbarProps = {
   showCategory?: boolean;
   activeCategory: string;
   activeSort: string;
-  /** When product list is still fetching, avoid showing “0 results” in the summary line. */
+  /** When true, show skeleton pills (caller usually scopes this to category/search-query changes, not every refetch). */
+  facetFiltersBusy?: boolean;
+  /** When true, show “Loading results…” instead of counts (same scope as facet skeleton — avoid on pill toggles). */
   resultsLoading?: boolean;
   total: number;
   /** Count matching filters before pagination (same as API `total`). */
@@ -43,6 +46,7 @@ export const CatalogToolbar = ({
   showCategory = true,
   activeCategory,
   activeSort,
+  facetFiltersBusy = false,
   resultsLoading = false,
   total,
   totalFiltered,
@@ -128,7 +132,11 @@ export const CatalogToolbar = ({
         </div>
       </div>
 
-      {onVerticalChange && verticalFacet?.values?.length ? (
+      {facetFiltersBusy && (onVerticalChange || onFreeDeliveryToggle) ? (
+        <CatalogFacetFiltersSkeleton />
+      ) : null}
+
+      {onVerticalChange && !facetFiltersBusy && verticalFacet?.values?.length ? (
         <div className="grid gap-3" aria-label="Department filters">
           <span className={`text-[0.65rem] font-semibold uppercase tracking-ui-wide ${tw.muted}`}>Department</span>
           <div className="flex flex-wrap gap-2">
@@ -162,7 +170,7 @@ export const CatalogToolbar = ({
         </div>
       ) : null}
 
-      {onFreeDeliveryToggle ? (
+      {onFreeDeliveryToggle && !facetFiltersBusy ? (
         <div className="grid gap-3" role="presentation">
           <span className={`text-[0.65rem] font-semibold uppercase tracking-ui-wide ${tw.muted}`}>Delivery</span>
           <div className="flex flex-wrap gap-2">

@@ -35,6 +35,7 @@ These surfaces read “luxury catalog” only when photography matches the refer
 ### Empty / error routes
 
 - **`public/not-found-product-cutout.webp`** — bath towel packshot (vertical textile, distinct from PDP hero throw + `collection-new/grid-*`); source PNG `https://pngimg.com/uploads/towel/towel_PNG1.png`, re-encoded to RGBA WebP (~q88). **PNGimg terms apply**; swap for brand packshot when available.
+- **`public/catalog-filter-empty-cutout.webp`** — jacket packshot for **zero-result filters** on catalog / search; source PNG `https://pngimg.com/uploads/jacket/jacket_PNG8037.png` (see `public/catalog/README.md`). **PNGimg terms apply**; swap for brand-owned packshot when available.
 
 ## What The References Emphasize
 

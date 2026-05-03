@@ -6,7 +6,6 @@ import {
   type DetailTab,
 } from "@/features/catalog/components/pdp/pdpShared";
 import type { Product } from "@/shared/api/contracts";
-import { tw } from "@/shared/ui/tw";
 
 type PdpTabbedDetailsProps = {
   product: Product;

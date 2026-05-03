@@ -38,7 +38,7 @@ function cloneReviewSeeds(): Record<string, ProductReview[]> {
 }
 
 /** Mutable PDP review threads + current shopper’s submitted review per slug (demo session). */
-let reviewsBySlug: Record<string, ProductReview[]> = cloneReviewSeeds();
+const reviewsBySlug: Record<string, ProductReview[]> = cloneReviewSeeds();
 const viewerReviewBySlug: Record<string, ViewerProductReview | null> = {};
 
 function mergeViewerReview(slug: string, product: (typeof products)[number]) {
@@ -64,48 +64,29 @@ function productVertical(p: Product): ProductVertical {
   return p.vertical ?? "general";
 }
 
-function buildFacets(filtered: Product[]): CatalogFacetGroup[] {
-  const count = (pred: (p: Product) => boolean) => filtered.filter(pred).length;
-  return [
-    {
-      id: "vertical",
-      label: "Department",
-      facetType: "multi",
-      values: [
-        { value: "apparel", label: "Apparel & accessories", count: count((p) => productVertical(p) === "apparel") },
-        { value: "furniture", label: "Furniture & lighting", count: count((p) => productVertical(p) === "furniture") },
-        { value: "electronics", label: "Electronics", count: count((p) => productVertical(p) === "electronics") },
-        { value: "general", label: "Everyday & other", count: count((p) => productVertical(p) === "general") },
-      ],
-    },
-    {
-      id: "freeDelivery",
-      label: "Delivery",
-      facetType: "boolean",
-      values: [{ value: "true", label: "Free delivery", count: count((p) => p.freeDelivery === true) }],
-    },
-    {
-      id: "price",
-      label: "Price",
-      facetType: "range",
-      min: filtered.length ? Math.min(...filtered.map((p) => p.price)) : 0,
-      max: filtered.length ? Math.max(...filtered.map((p) => p.price)) : 0,
-    },
-  ];
-}
+type FilterSkip = {
+  /** When true, ignore the `vertical` URL filter while computing the slice (used for the vertical facet group). */
+  vertical?: boolean;
+  /** When true, ignore the `freeDelivery` URL filter while computing the slice (used for the delivery facet). */
+  freeDelivery?: boolean;
+};
 
-function filterProducts(url: URL): ProductListResponse {
+/**
+ * Product slice used for list + facet aggregation (no sort / pagination).
+ *
+ * `skip` lets callers exclude a facet's own selection so that group's counts reflect
+ * "what would happen if you switched within this facet" — standard multi/boolean facet
+ * semantics (OR within a facet group, AND across groups).
+ */
+function applyProductFilters(url: URL, skip: FilterSkip = {}): Product[] {
   const category = url.searchParams.get("category");
   const search = url.searchParams.get("q");
-  const sort = url.searchParams.get("sort") ?? "featured";
   const brand = url.searchParams.get("brand");
   const vertical = url.searchParams.get("vertical");
   const freeDelivery = url.searchParams.get("freeDelivery");
   const tagsParam = url.searchParams.get("tags");
   const minPrice = url.searchParams.get("minPrice");
   const maxPrice = url.searchParams.get("maxPrice");
-  const page = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
-  const pageSize = Math.min(48, Math.max(1, Number(url.searchParams.get("pageSize") ?? "12")));
 
   let filtered: Product[] = [...products];
 
@@ -125,12 +106,12 @@ function filterProducts(url: URL): ProductListResponse {
     filtered = filtered.filter((p) => p.brand.toLowerCase() === brand.toLowerCase());
   }
 
-  if (vertical) {
+  if (vertical && !skip.vertical) {
     const wanted = vertical.split(",").map((v) => v.trim()) as ProductVertical[];
     filtered = filtered.filter((p) => wanted.includes(productVertical(p)));
   }
 
-  if (freeDelivery === "true") {
+  if (freeDelivery === "true" && !skip.freeDelivery) {
     filtered = filtered.filter((p) => p.freeDelivery === true);
   }
 
@@ -153,6 +134,54 @@ function filterProducts(url: URL): ProductListResponse {
     }
   }
 
+  return filtered;
+}
+
+/**
+ * Builds facet groups using **per-group** filter slices: counts within a group ignore that
+ * group's own selection so non-active values don't drop to zero when one is selected.
+ */
+function buildFacets(url: URL): CatalogFacetGroup[] {
+  const verticalSlice = applyProductFilters(url, { vertical: true });
+  const deliverySlice = applyProductFilters(url, { freeDelivery: true });
+  const fullSlice = applyProductFilters(url);
+  const count = (slice: Product[], pred: (p: Product) => boolean) => slice.filter(pred).length;
+
+  return [
+    {
+      id: "vertical",
+      label: "Department",
+      facetType: "multi",
+      values: [
+        { value: "apparel", label: "Apparel & accessories", count: count(verticalSlice, (p) => productVertical(p) === "apparel") },
+        { value: "furniture", label: "Furniture & lighting", count: count(verticalSlice, (p) => productVertical(p) === "furniture") },
+        { value: "electronics", label: "Electronics", count: count(verticalSlice, (p) => productVertical(p) === "electronics") },
+        { value: "general", label: "Everyday & other", count: count(verticalSlice, (p) => productVertical(p) === "general") },
+      ],
+    },
+    {
+      id: "freeDelivery",
+      label: "Delivery",
+      facetType: "boolean",
+      values: [{ value: "true", label: "Free delivery", count: count(deliverySlice, (p) => p.freeDelivery === true) }],
+    },
+    {
+      id: "price",
+      label: "Price",
+      facetType: "range",
+      min: fullSlice.length ? Math.min(...fullSlice.map((p) => p.price)) : 0,
+      max: fullSlice.length ? Math.max(...fullSlice.map((p) => p.price)) : 0,
+    },
+  ];
+}
+
+function filterProducts(url: URL): ProductListResponse {
+  const sort = url.searchParams.get("sort") ?? "featured";
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+  const pageSize = Math.min(48, Math.max(1, Number(url.searchParams.get("pageSize") ?? "12")));
+
+  const filtered = applyProductFilters(url);
+
   if (sort === "price-asc") {
     filtered.sort((a, b) => a.price - b.price);
   } else if (sort === "price-desc") {
@@ -162,7 +191,6 @@ function filterProducts(url: URL): ProductListResponse {
   }
 
   const total = filtered.length;
-  const facets = buildFacets(filtered);
   const start = (page - 1) * pageSize;
   const items = filtered.slice(start, start + pageSize);
 
@@ -171,7 +199,6 @@ function filterProducts(url: URL): ProductListResponse {
     total,
     page,
     pageSize,
-    facets,
     personalized: consentState.scopes.includes("personalization"),
   };
 }
@@ -199,9 +226,9 @@ const seedAddresses: DeliveryAddress[] = [
   },
 ];
 
-let addressBook: DeliveryAddress[] = seedAddresses.map((a) => ({ ...a }));
+const addressBook: DeliveryAddress[] = seedAddresses.map((a) => ({ ...a }));
 
-let ordersState: OrderSummary[] = [
+const ordersState: OrderSummary[] = [
   {
     id: "ord-demo-1001",
     status: "shipped",
@@ -234,6 +261,10 @@ export const handlers = [
   http.get("/api/catalog/categories", async () => {
     await delay(150);
     return HttpResponse.json(categories);
+  }),
+  http.get("/api/catalog/facets", async ({ request }) => {
+    await delay(200);
+    return HttpResponse.json(buildFacets(new URL(request.url)));
   }),
   http.get("/api/catalog/products", async ({ request }) => {
     await delay(240);

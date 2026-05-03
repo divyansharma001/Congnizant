@@ -1,5 +1,6 @@
 import { env } from "@/shared/config/env";
 import type {
+  CatalogFacetGroup,
   Category,
   CheckoutInput,
   CheckoutResponse,
@@ -40,6 +41,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const apiClient = {
   getCategories: () => request<Category[]>("/catalog/categories"),
+  /**
+   * Aggregated facet counts for the current browse/search filter context (category/q + facet selections).
+   * Not tied to sort/page — call separately from the product list.
+   */
+  getCatalogFacets: (params = "") => request<CatalogFacetGroup[]>(`/catalog/facets${params}`),
   getProducts: (params = "") => request<ProductListResponse>(`/catalog/products${params}`),
   /** Same catalog slice for every shopper — popularity / bestseller ordering from the server. */
   getPopularProducts: () => request<Product[]>(`/catalog/popular`),

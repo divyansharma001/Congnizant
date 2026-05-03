@@ -1,12 +1,7 @@
-import { Link } from "react-router-dom";
-
 import { tw } from "@/shared/ui/tw";
 
 /** Distinct from `EditorialHero` throw — front studio jacket packshot (RGBA), same grid vocabulary as `/catalog`. */
 const PRE_FOOTER_IMG = "/collection-new/grid-jacket.webp";
-
-const navQuiet =
-  "text-[0.8125rem] font-medium tracking-body text-ink/80 transition-opacity hover:opacity-60 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
 /**
  * Sonnette-style closing band on `/` — white field, wordmark + links, then centered cutout above

@@ -58,11 +58,29 @@ Response:
 
 - `items` — page slice of `Product`
 - `page`, `pageSize`, `total`
-- `facets` — array of facet groups with **counts for the current filter context** (computed on the filtered set **before** pagination), e.g.:
-  - `vertical` (multi): apparel / furniture / electronics / general counts
-  - `freeDelivery` (boolean): count of items with free delivery in the current slice
-  - `price` (range): `min` / `max` price across filtered items (UI can render a histogram later)
 - `personalized` — boolean echo (consent-driven ranking may adjust order in a real backend; demo may keep deterministic sort)
+- _(Legacy)_ `facets` on this response is optional/deprecated — prefer **`GET /catalog/facets`** so facet aggregates are not coupled to sort/page refetches (see below).
+
+#### `GET /catalog/facets`
+
+Separate facet aggregation for listing/search UIs. Use the **same filter params** as `GET /catalog/products` / search **except** `sort`, `page`, and `pageSize` do not affect facet membership counts.
+
+Returns `CatalogFacetGroup[]` — counts for the current filter context (computed **before** pagination), with **per-group** semantics: counts within `vertical` ignore the active `vertical` selection when tallying other departments (standard facet UX); same idea for `freeDelivery`.
+
+#### Product fields required for current listing filters
+
+On each **`Product`**, the backend must expose at minimum:
+
+| Filter / facet | `Product` fields |
+|----------------|------------------|
+| Category browse (`category` query param) | `category` — slug aligned with `GET /catalog/categories` |
+| Department / vertical pills | `vertical` — `apparel` \| `furniture` \| `electronics` \| omit → treated as `general` in filters |
+| Free delivery toggle | `freeDelivery` — boolean |
+| Price range (when wired) | `price` — number |
+| Tag chips (when wired) | `tags[]`, `personalizationTags[]` |
+| Text search | `name`, `brand`, `description`, `features[]`, `tags[]` (substring match per search contract) |
+
+Everything above is already described on the **`Product`** shape in this document; there is no separate “filter schema” beyond these columns.
 
 #### `GET /catalog/products/{slug}`
 

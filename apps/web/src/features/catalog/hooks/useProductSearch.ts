@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useDeferredValue } from "react";
 
 import { apiClient } from "@/shared/api/client";
@@ -44,5 +44,7 @@ export function useProductSearch({
   return useQuery({
     queryKey: ["products", deferredSearch, category, sort, page, vertical, freeDelivery],
     queryFn: () => apiClient.getProducts(`?${query.toString()}`),
+    /** Keeps grid stable while sort/page/filters change; facets use `useCatalogFacets` / `useSearchFacets` (separate cache). */
+    placeholderData: keepPreviousData,
   });
 }

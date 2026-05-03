@@ -7,36 +7,6 @@ import { tw } from "@/shared/ui/tw";
 /** RGBA WebP in `public/footer-product-mark.webp` — floating commerce mark (ref feather). */
 const FOOTER_MARK_IMG = "/footer-product-mark.webp";
 
-function SocialPinterest({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8-.11-.78-.2-1.97.04-2.82.22-.95 1.4-6.02 1.4-6.02s-.36-.72-.36-1.79c0-1.68.97-2.93 2.19-2.93 1.03 0 1.53.78 1.53 1.71 0 1.04-.66 2.6-1 4.05-.28 1.21.6 2.2 1.78 2.2 2.14 0 3.78-2.25 3.78-5.5 0-2.88-2.07-4.9-5.02-4.9-3.42 0-5.43 2.56-5.43 5.2 0 1.03.4 2.13.9 2.73.1.12.11.22.08.34-.09.36-.29 1.15-.33 1.31-.05.22-.17.27-.4.16-1.5-.7-2.43-2.88-2.43-4.64 0-3.77 2.74-7.23 7.9-7.23 4.15 0 7.38 2.96 7.38 6.91 0 4.12-2.6 7.43-6.21 7.43-1.23 0-2.39-.64-2.78-1.4l-.76 2.89c-.27 1.06-1 2.4-1.49 3.21 1.12.35 2.31.54 3.55.54 5.52 0 10-4.48 10-10S17.52 2 12 2z" />
-    </svg>
-  );
-}
-
-function SocialInstagram({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" />
-    </svg>
-  );
-}
-
-function SocialFacebook({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M22 12c0-5.523-4.477-10-10-10S2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.878v-6.987h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.988C18.343 21.128 22 16.991 22 12z"
-      />
-    </svg>
-  );
-}
-
 const footerLink =
   "text-[0.8125rem] font-normal leading-[2] text-ink/88 transition-opacity hover:opacity-60";
 
@@ -66,7 +36,7 @@ const linkColumns: { links: { label: string; to: string }[] }[] = [
 ];
 
 /**
- * Editorial footer — Sonnette-style: mark, serif headline, email line, socials,
+ * Editorial footer — Sonnette-style: mark, serif headline, email line,
  * three quiet link columns, mega wordmark clipped at bottom edge.
  */
 export function Footer() {
@@ -132,36 +102,6 @@ export function Footer() {
               </button>
             </div>
           </form>
-
-          {/* <div className="mt-11 flex items-center justify-center gap-5 sm:mt-12">
-            <a
-              href="https://www.pinterest.com/"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="flex size-10 items-center justify-center rounded-full border border-outline/55 text-ink/65 transition-colors hover:border-ink/30 hover:text-ink"
-              aria-label="Pinterest (opens in new tab)"
-            >
-              <SocialPinterest className="opacity-90" />
-            </a>
-            <a
-              href="https://www.instagram.com/"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="flex size-10 items-center justify-center rounded-full border border-outline/55 text-ink/65 transition-colors hover:border-ink/30 hover:text-ink"
-              aria-label="Instagram (opens in new tab)"
-            >
-              <SocialInstagram className="opacity-90" />
-            </a>
-            <a
-              href="https://www.facebook.com/"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="flex size-10 items-center justify-center rounded-full border border-outline/55 text-ink/65 transition-colors hover:border-ink/30 hover:text-ink"
-              aria-label="Facebook (opens in new tab)"
-            >
-              <SocialFacebook className="opacity-90" />
-            </a>
-          </div> */}
         </div>
 
         {/* Link columns — ref: three blocks, sentence case, generous line height */}
