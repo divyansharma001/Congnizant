@@ -22,6 +22,9 @@ class CustomerEvent(BaseModel):
     status: str = "pending"  # pending → processing → processed | failed
     consent_scope: set[str] = Field(default_factory=set)
     created_at: str = Field(default_factory=utc_now_iso)
+    # Epoch seconds — DynamoDB TTL field. Set by the server from the
+    # customer's consent retention_days at ingest time.
+    expires_at: int | None = None
 
 
 class ConsentRecord(BaseModel):

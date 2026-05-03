@@ -83,9 +83,14 @@ class InMemoryVectorStore:
             del coll[doc_id]
 
 
-def make_vector_store(mode: str = "mock") -> VectorStoreProtocol:
-    if mode == "mock":
+def make_vector_store(
+    mode: str = "memory",
+    host: str = "opensearch",
+    port: int = 9200,
+) -> VectorStoreProtocol:
+    if mode == "memory":
         return InMemoryVectorStore()
-    if mode == "real":
-        raise NotImplementedError("Real OpenSearch arrives in Phase 7")
+    if mode == "opensearch":
+        from .opensearch import OpenSearchClient
+        return OpenSearchClient(host=host, port=port)
     raise ValueError(f"Unknown vector store mode: {mode!r}")

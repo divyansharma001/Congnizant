@@ -13,15 +13,24 @@ services:
       - ./server/src:/app/src
       - ./shared:/app/shared
       - ./scripts:/app/scripts
+      - traces:/app/traces
     environment:
       REDIS_URL: redis://redis:6379
       DYNAMODB_ENDPOINT: http://dynamodb-local:8000
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
+      API_KEY: ${API_KEY:-test-key}
+      TRACES_DB_PATH: /app/traces/agent_traces.db
     depends_on:
       - redis
       - dynamodb-local
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   worker:
@@ -33,9 +42,11 @@ services:
       - ./worker/src:/app/src
       - ./shared:/app/shared
       - ./scripts:/app/scripts
+      - traces:/app/traces
     environment:
       REDIS_URL: redis://redis:6379
       DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      TRACES_DB_PATH: /app/traces/agent_traces.db
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-local}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-local}
@@ -43,9 +54,19 @@ services:
       BEDROCK_REGION: ${BEDROCK_REGION:-us-east-1}
       BEDROCK_TEXT_MODEL: ${BEDROCK_TEXT_MODEL:-anthropic.claude-sonnet-4-5-20250929-v1:0}
       BEDROCK_EMBED_MODEL: ${BEDROCK_EMBED_MODEL:-amazon.titan-embed-text-v2:0}
+      VECTOR_MODE: ${VECTOR_MODE:-opensearch}
+      OPENSEARCH_HOST: ${OPENSEARCH_HOST:-opensearch}
+      OPENSEARCH_PORT: ${OPENSEARCH_PORT:-9200}
     depends_on:
       - redis
       - dynamodb-local
+      - opensearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; redis.from_url('redis://redis:6379').ping()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   redis:
@@ -54,6 +75,11 @@ services:
     # Not exposed to the host — server/worker reach it via the docker network
     # at redis://redis:6379. To run redis-cli, use:
     #   docker exec -it hyperpersona-redis-1 redis-cli
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   dynamodb-local:
@@ -63,3 +89,34 @@ services:
       - "8001:8000"
     command: -jar DynamoDBLocal.jar -sharedDb -inMemory
     restart: unless-stopped
+
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    container_name: hyperpersona-opensearch-1
+    environment:
+      cluster.name: hyperpersona-cluster
+      node.name: hyperpersona-node
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  traces:

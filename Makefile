@@ -1,4 +1,4 @@
-.PHONY: up down logs build server worker restart-worker setup-db seed-consent scan-events scan-jobs scan-consent peek-queue test-bedrock test-tools show-trace clean ps
+.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools test-recommend test-privacy test-e2e demo-conflict show-trace clean ps
 
 up:
 	docker compose up -d --build
@@ -26,6 +26,15 @@ restart-worker:
 setup-db:
 	docker compose exec server python /app/scripts/setup_dynamodb.py
 
+# Phase 7 — OpenSearch indexes and vector inspection
+setup-opensearch:
+	docker compose exec worker python /app/scripts/setup_opensearch.py
+
+# usage: make scan-vectors COLL=customer-facts CUST=cust_1
+# CUST is optional; omit it to scan everything in the collection
+scan-vectors:
+	docker compose exec worker python /app/scripts/scan_vectors.py $(COLL) $(CUST)
+
 scan-events:
 	docker compose exec server python /app/scripts/scan.py customer_events
 
@@ -52,6 +61,24 @@ test-tools:
 # Phase 6 — Show the agent trace for one job: make show-trace JOB=<job_id>
 show-trace:
 	docker compose exec worker python /app/scripts/show_trace.py $(JOB)
+
+# Phase 8 — Hit GET /recommend: make test-recommend CUST=cust_1 CTX="outdoor gear"
+test-recommend:
+	curl -s -H "X-API-Key: test-key" \
+	  --data-urlencode "customer_id=$(CUST)" \
+	  --data-urlencode "context=$(CTX)" \
+	  -G "http://localhost:8000/recommend"
+
+# Phase 11 — End-to-end privacy + GDPR delete verification
+test-privacy:
+	docker compose exec server python /app/scripts/test_privacy.py
+
+# Phase 12 — Full happy-path demo + ACE conflict-detection demo
+test-e2e:
+	docker compose exec server python /app/scripts/test_e2e.py
+
+demo-conflict:
+	docker compose exec server python /app/scripts/conflict_demo.py
 
 ps:
 	docker compose ps

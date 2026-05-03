@@ -127,6 +127,40 @@ class Job(BaseModel):
     created_at: str
     completed_at: str | None = None
     error: str | None = None
+
+class Product(BaseModel):
+    product_id: str
+    name: str
+    brand: str
+    category: str
+    description: str
+    tags: list[str] = []
+    price: float
+    inventory_count: int
+    margin_band: str = "medium"  # low | medium | high
+    promotion: str | None = None
+    active: bool = True
+    image_url: str | None = None
+    catalog_version: int = 1
+    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+class RecommendationItem(BaseModel):
+    product_id: str
+    name: str
+    score: float
+    reason: str
+    offer: str | None = None
+
+class RecommendationRecord(BaseModel):
+    recommendation_id: str = Field(default_factory=lambda: str(uuid4()))
+    customer_id: str
+    job_id: str | None = None
+    context: str
+    items: list[RecommendationItem]
+    why: list[str] = []
+    avoided: list[str] = []
+    confidence: float | None = None
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 ```
 
 **Tables to create:**
@@ -136,12 +170,24 @@ class Job(BaseModel):
 | customer_events | CUSTOMER#{id} | EVENT#{timestamp}#{event_id} | status-index (status, created_at) |
 | customer_consent | CUSTOMER#{id} | CONSENT | — |
 | jobs | JOB#{job_id} | META | status-index (status, created_at) |
+| product_catalog | PRODUCT#{product_id} | META | category-index (category, updated_at) |
+| recommendations | CUSTOMER#{id} | RECOMMENDATION#{created_at}#{recommendation_id} | job-index (job_id, created_at) |
+
+**Product catalog storage rule:**
+
+Keep products in both a normal DB and a vector DB:
+
+- `product_catalog` in DynamoDB is the source of truth for product_id, price, inventory, margin, promotion, active status, image URL, and catalog_version.
+- `product-catalog` in OpenSearch/vector DB is a semantic search index for product descriptions, tags, use cases, style attributes, and embeddings.
+- The vector DB should return candidate `product_id` values only. The recommender must hydrate fresh price, inventory, active status, and promotion from DynamoDB before producing the final offer.
+- Use `catalog_version` or `updated_at` in both stores to detect stale vector records.
 
 **Files to create/modify:**
 
 - shared/schemas.py — all Pydantic models
 - shared/dynamo.py — DynamoDB helper class (put_item, get_item, query, update_status)
 - scripts/setup_dynamodb.py — creates all tables in DynamoDB Local
+- scripts/seed_products.py — seeds product_catalog and syncs product-catalog vector index
 - server/src/main.py — add POST /events endpoint (writes to DynamoDB + enqueues job)
 - server/tests/test_events.py — test event creation
 
@@ -150,8 +196,10 @@ class Job(BaseModel):
 1. Write shared/schemas.py with all models
 2. Write shared/dynamo.py with a DynamoClient class wrapping boto3
 3. Write scripts/setup_dynamodb.py to create tables
-4. Add POST /events to server: validate with Pydantic, write to customer_events table, push job to Redis queue
-5. Test: POST an event, verify it's in DynamoDB, verify job is in Redis
+4. Add Product and RecommendationRecord models
+5. Add POST /events to server: validate with Pydantic, write to customer_events table, push job to Redis queue
+6. Seed a small retail catalog into DynamoDB for demo scenarios
+7. Test: POST an event, verify it's in DynamoDB, verify job is in Redis
 
 **Test checkpoint:**
 
@@ -386,27 +434,45 @@ def analyze_behavior(customer_id: str, event_text: str, event_id: str) -> dict:
 
 ```python
 @tool
-def generate_recommendation(customer_id: str, context: str) -> dict:
-    """Retrieve from all memory tiers, apply ACE ranking, generate personalized offer."""
+def generate_recommendation(customer_id: str, context: str, limit: int = 5) -> dict:
+    """Retrieve memory + product candidates, apply ACE/business ranking,
+    and generate multiple personalized offers."""
 
     # 1. Embed context
     query_vec = bedrock.embed(context)
 
-    # 2. Parallel retrieval from 3 collections
+    # 2. Parallel retrieval from customer memory and product catalog
     facts = opensearch.search("customer-facts", query_vec, k=8, filter=customer_id)
     events = opensearch.search("behavior-embeddings", query_vec, k=8, filter=customer_id)
+    product_hits = opensearch.search("product-catalog", query_vec, k=20, filter={"active": True})
     session = redis.get(f"session:{customer_id}")
 
     # 3. ACE ranking (recency, polarity, conflict detection)
     ranked_facts, conflicts = ace_ranking(facts)
 
-    # 4. Generate offer via Bedrock
-    offer = bedrock.generate(
-        prompt=build_recommendation_prompt(ranked_facts, events, session, conflicts),
+    # 4. Hydrate vector candidates from product_catalog source of truth
+    product_ids = [hit["product_id"] for hit in product_hits]
+    products = dynamo.batch_get_products(product_ids)
+    products = [p for p in products if p["active"] and p["inventory_count"] > 0]
+
+    # 5. Rank products with semantic match + customer fit + business rules
+    ranked_products = rank_products(products, product_hits, ranked_facts, conflicts)[:limit]
+
+    # 6. Generate offers via Bedrock
+    offers = bedrock.generate(
+        prompt=build_recommendation_prompt(ranked_facts, events, session, ranked_products, conflicts),
         system=RECOMMENDER_SYSTEM_PROMPT
     )
 
-    return {"offer": offer, "facts_used": len(ranked_facts), "conflicts": conflicts}
+    return {
+        "items": offers["items"],
+        "facts_used": len(ranked_facts),
+        "products_considered": len(products),
+        "conflicts": conflicts,
+        "why": offers.get("why", []),
+        "avoided": offers.get("avoided", []),
+        "confidence": offers.get("confidence")
+    }
 ```
 
 **verifier_tool.py:**
@@ -610,7 +676,7 @@ for trace in t.get_traces('JOB_ID_HERE'):
 
 ## Phase 7 — OpenSearch vector memory (ACE layer)
 
-**Goal:** All three vector collections working. ACE ranking logic ported. Retrieval + storage tested end-to-end.
+**Goal:** Customer memory and product catalog vector collections working. ACE ranking logic ported. Retrieval + storage tested end-to-end.
 
 **What to build:**
 
@@ -618,6 +684,32 @@ for trace in t.get_traces('JOB_ID_HERE'):
 - shared/ace_ranking.py — recencyWeight, normalizeKey, polarityScore, conflict detection
 - docker-compose.yml — add OpenSearch container for local dev
 - scripts/setup_opensearch.py — create 3 collections with 1024-dim cosine index
+
+**Vector collections:**
+
+| Collection | Purpose | Source of truth |
+|------------|---------|-----------------|
+| customer-facts | Durable extracted customer preferences and facts | OpenSearch + DynamoDB event lineage |
+| behavior-embeddings | Raw event memory for semantic retrieval | customer_events |
+| session-summaries | Short-term customer/session memory | Redis/DynamoDB |
+| product-catalog | Semantic product retrieval | product_catalog DynamoDB table |
+
+**Product catalog sync flow:**
+
+```text
+Product created/updated in product_catalog
+        |
+        v
+Build embedding_text from name, brand, category, description, tags, use cases
+        |
+        v
+Generate embedding with Bedrock
+        |
+        v
+Upsert product-catalog vector doc with product_id and catalog_version
+```
+
+For the hackathon, `scripts/seed_products.py` can do the whole sync. For production, replace that with DynamoDB Streams -> Lambda/ECS sync worker -> Bedrock embeddings -> OpenSearch upsert.
 
 **shared/ace_ranking.py** (ported from your helpers.ts):
 
@@ -699,12 +791,14 @@ def rank_facts(facts: list[dict]) -> tuple[list[dict], list[str]]:
 
 1. Add OpenSearch to docker-compose (use opensearchproject/opensearch:2 for local dev)
 2. Write shared/opensearch.py with init_collections, search, upsert, get_by_id
-3. Write scripts/setup_opensearch.py to create 3 indexes
-4. Write shared/ace_ranking.py (above)
-5. Write tests for ACE ranking with mock facts (test conflict detection, recency, polarity)
-6. Wire analyzer_tool.py to real OpenSearch upserts
-7. Wire recommender_tool.py to real OpenSearch searches + ACE ranking
-8. Test full flow: ingest event → facts stored → retrieve and rank
+3. Write scripts/setup_opensearch.py to create 4 indexes: customer-facts, behavior-embeddings, session-summaries, product-catalog
+4. Write scripts/seed_products.py to seed DynamoDB product_catalog and sync product-catalog vector docs
+5. Write shared/ace_ranking.py (above)
+6. Write tests for ACE ranking with mock facts (test conflict detection, recency, polarity)
+7. Wire analyzer_tool.py to real OpenSearch upserts
+8. Wire recommender_tool.py to search customer facts, behavior events, and product-catalog, then hydrate product details from DynamoDB
+9. Store every completed recommendation in the recommendations table
+10. Test full flow: ingest event -> facts stored -> products retrieved -> multiple ranked recommendations returned
 
 **Test checkpoint:**
 
@@ -745,7 +839,9 @@ curl "http://localhost:8000/recommend?customer_id=cust_1&context=looking+for+out
 |--------|------|-------------|------|
 | GET | /health | Liveness check | No |
 | POST | /events | Ingest behavior event | API key |
-| GET | /recommend | Get personalized offer | API key |
+| GET | /recommend | Generate ranked personalized recommendations for a customer/context | API key |
+| GET | /recommendations | List recommendation history, optionally filtered by customer_id | API key |
+| GET | /recommendations/{recommendation_id} | Get one stored recommendation result | API key |
 | POST | /consent | Create/update consent | API key |
 | GET | /consent/{customer_id} | Get consent status | API key |
 | DELETE | /customer/{customer_id} | Right-to-delete (GDPR) | API key |
@@ -760,7 +856,7 @@ Also wire `POST /events` ingestion for review telemetry (`product_reviews_viewed
 **Files to create/modify:**
 
 - server/src/routes/events.py — POST /events
-- server/src/routes/recommend.py — GET /recommend (calls worker or directly calls the recommendation pipeline)
+- server/src/routes/recommend.py - GET /recommend, GET /recommendations, GET /recommendations/{recommendation_id}
 - server/src/routes/consent.py — CRUD for consent
 - server/src/routes/customer.py — DELETE for right-to-delete
 - server/src/routes/jobs.py — Job status lookup
@@ -772,24 +868,63 @@ Also wire `POST /events` ingestion for review telemetry (`product_reviews_viewed
 
 ```python
 @router.get("/recommend")
-async def recommend(customer_id: str, context: str):
+async def recommend(customer_id: str, context: str, limit: int = 5):
     # 1. Check Redis cache
-    cached = redis.get(f"offer:{customer_id}:{hash(context)}")
+    cached = redis.get(f"recommendations:{customer_id}:{hash(context)}:{limit}")
     if cached:
         return json.loads(cached)
 
     # 2. Cache miss — enqueue recommendation job
     job = Job(job_type="generate_recommendation",
-              payload={"customer_id": customer_id, "context": context})
+              payload={"customer_id": customer_id, "context": context, "limit": limit})
     dynamo.put_job(job)
     redis.lpush("jobs:pending", job.model_dump_json())
 
     # 3. Wait for result (poll DynamoDB or use Redis pub/sub)
     result = await wait_for_job(job.job_id, timeout=30)
 
-    # 4. Cache and return
-    redis.setex(f"offer:{customer_id}:{hash(context)}", 300, json.dumps(result))
+    # 4. Store recommendation history, cache, and return
+    dynamo.put_recommendation(result)
+    redis.setex(f"recommendations:{customer_id}:{hash(context)}:{limit}", 300, json.dumps(result))
     return result
+```
+
+**Expected recommendation response shape:**
+
+```json
+{
+  "recommendation_id": "...",
+  "customer_id": "cust_1",
+  "context": "looking for shoes",
+  "items": [
+    {
+      "rank": 1,
+      "product_id": "sku_123",
+      "name": "Salomon X Ultra 4 GTX",
+      "offer": "10% trail bundle discount",
+      "score": 0.91,
+      "reason": "Matches waterproof hiking intent and recent trail activity"
+    }
+  ],
+  "why": ["Customer searched for waterproof hiking boots"],
+  "avoided": ["Nike-heavy offers avoided due to recent returns"],
+  "confidence": 0.87,
+  "debug": {"job_id": "..."}
+}
+```
+
+`GET /recommend` should return multiple ranked items by default, not one recommendation. Use `limit=3` or `limit=5` for the demo.
+
+**Recommendation history routes:**
+
+```python
+@router.get("/recommendations")
+async def list_recommendations(customer_id: str | None = None, limit: int = 20):
+    return dynamo.list_recommendations(customer_id=customer_id, limit=limit)
+
+@router.get("/recommendations/{recommendation_id}")
+async def get_recommendation(recommendation_id: str):
+    return dynamo.get_recommendation(recommendation_id)
 ```
 
 **Steps:**
@@ -798,7 +933,8 @@ async def recommend(customer_id: str, context: str):
 2. Write rate limit middleware (Redis-based)
 3. Implement all endpoints
 4. Write tests for each endpoint
-5. Test full flow: create consent → ingest events → get recommendation
+5. Add recommendation history writes and reads
+6. Test full flow: create consent -> ingest events -> get multiple ranked recommendations -> list saved recommendations
 
 **Test checkpoint:**
 
@@ -816,9 +952,13 @@ for i in 1 2 3; do
 done
 
 # Get recommendation
-curl "http://localhost:8000/recommend?customer_id=cust_1&context=looking+for+shoes" \
+curl "http://localhost:8000/recommend?customer_id=cust_1&context=looking+for+shoes&limit=5" \
   -H "X-API-Key: test-key"
-# → {"offer": "Based on your browsing of shoes...", "confidence": 0.87, ...}
+# -> {"items": [{"rank": 1, "product_id": "...", "offer": "..."}], "confidence": 0.87, ...}
+
+# List saved recommendations
+curl "http://localhost:8000/recommendations?customer_id=cust_1&limit=20" \
+  -H "X-API-Key: test-key"
 ```
 
 **Duration:** 4–6 hours

@@ -2,12 +2,12 @@
 
 Usage: make show-trace JOB=<job_id>
 
-Reads /tmp/agent_traces.db inside the worker container — so traces only
-persist as long as the worker container is running. Phase 9 will sync
-the file to S3 on every job completion.
+Reads the SQLite trace file the worker writes. Path comes from
+TRACES_DB_PATH env var (falls back to the shared volume default).
 """
 
 import json
+import os
 import sys
 
 from src.trace_logger import TraceLogger
@@ -19,7 +19,8 @@ def main() -> None:
         sys.exit(1)
 
     job_id = sys.argv[1].strip()
-    tracer = TraceLogger("/tmp/agent_traces.db")
+    db_path = os.getenv("TRACES_DB_PATH", "/app/traces/agent_traces.db")
+    tracer = TraceLogger(db_path)
     rows = tracer.get_traces(job_id)
 
     if not rows:

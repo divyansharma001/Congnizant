@@ -83,10 +83,31 @@ def create_or_skip(spec: dict) -> str:
         raise
 
 
+def enable_ttl(table_name: str, attribute: str = "expires_at") -> str:
+    """Enable DynamoDB TTL on a table. Idempotent."""
+    try:
+        dynamodb.update_time_to_live(
+            TableName=table_name,
+            TimeToLiveSpecification={
+                "Enabled": True,
+                "AttributeName": attribute,
+            },
+        )
+        return f"ttl on   {table_name}.{attribute}"
+    except ClientError as e:
+        # Already enabled with the same attribute → harmless
+        msg = str(e)
+        if "TimeToLive is already enabled" in msg or "already an active" in msg:
+            return f"ttl skip {table_name} (already enabled)"
+        raise
+
+
 def main() -> None:
     print(f"endpoint: {ENDPOINT}")
     for spec in TABLES:
         print(create_or_skip(spec))
+    # TTL on events so old data auto-expires per the customer's retention setting
+    print(enable_ttl("customer_events", "expires_at"))
 
 
 if __name__ == "__main__":
