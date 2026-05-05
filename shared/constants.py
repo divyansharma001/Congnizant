@@ -6,6 +6,7 @@ QUEUE_PENDING = "jobs:pending"
 # DynamoDB tables
 TABLE_CUSTOMER_EVENTS = "customer_events"
 TABLE_CUSTOMER_CONSENT = "customer_consent"
+TABLE_CUSTOMER_AUTH = "customer_auth"
 TABLE_JOBS = "jobs"
 
 # OpenSearch collections

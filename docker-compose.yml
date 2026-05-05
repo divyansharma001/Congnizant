@@ -25,6 +25,9 @@ services:
       MAX_QUEUE_DEPTH: ${MAX_QUEUE_DEPTH:-10000}
       MAX_EVENTS_PER_CUSTOMER_PER_MIN: ${MAX_EVENTS_PER_CUSTOMER_PER_MIN:-100}
       MAX_REQUESTS_PER_KEY_PER_MIN: ${MAX_REQUESTS_PER_KEY_PER_MIN:-1000}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
     depends_on:
       - redis
       - dynamodb-local

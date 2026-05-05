@@ -1,15 +1,16 @@
-"""Per-API-key fixed-window rate limit.
+"""Per-customer fixed-window rate limit (request rate, not event rate).
 
-Counter keyed on (api_key, current_minute) in Redis. Increment on every
+Counter keyed on (customer_id, current_minute) in Redis. Increment on every
 request; reject with 429 once we cross the limit. The 5-second TTL slop
 on the bucket key keeps Redis tidy without affecting accuracy.
 
-Mounted AFTER the API key auth middleware so unauthenticated requests
-fail at 401 and never pollute rate-limit buckets.
+Mounted AFTER JWTAuthMiddleware so unauth'd requests hit 401 first and
+the resolved customer_id is available on request.state. We fall back to
+the client IP (or "anonymous") if state has no customer_id — covers the
+small number of authed paths that might bypass JWT in the future.
 
-Bypassed paths: /health, /, /docs, /openapi.json, /redoc, /metrics/queue.
-The metrics endpoint specifically must NOT be rate-limited so operators
-can always see queue depth even under overload.
+Bypassed paths: PUBLIC_PATHS in auth.py + /metrics/queue (must always be
+observable, even under overload).
 """
 
 import logging
@@ -23,7 +24,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 log = logging.getLogger(__name__)
 
 _BYPASS_PATHS = {
-    "/health", "/", "/docs", "/openapi.json", "/redoc", "/metrics/queue",
+    "/health", "/", "/docs", "/openapi.json", "/redoc",
+    "/login", "/register", "/metrics/queue",
 }
 
 
@@ -44,9 +46,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in _BYPASS_PATHS:
             return await call_next(request)
 
-        api_key = request.headers.get("x-api-key", "anonymous")
+        # JWTAuthMiddleware ran first and stamped customer_id on request.state.
+        identity = getattr(request.state, "customer_id", None) or (
+            request.client.host if request.client else "anonymous"
+        )
         window = int(time.time() // self.window_s)
-        bucket = f"rate:key:{api_key}:{window}"
+        bucket = f"rate:cust_req:{identity}:{window}"
 
         count = self.redis.incr(bucket)
         if count == 1:
@@ -55,13 +60,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if count > self.limit:
             retry_after = self.window_s - (int(time.time()) % self.window_s)
             log.warning(
-                "rate limit exceeded",
-                extra={"api_key": api_key, "count": count, "limit": self.limit},
+                "request rate limit exceeded",
+                extra={"identity": identity, "count": count, "limit": self.limit},
             )
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={
-                    "error": "api_key rate limit exceeded",
+                    "error": "request rate limit exceeded",
                     "limit": self.limit,
                     "window_seconds": self.window_s,
                     "retry_after_seconds": retry_after,

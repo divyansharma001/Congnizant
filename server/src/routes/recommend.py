@@ -17,7 +17,7 @@ import hashlib
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from shared.queue import pop_result_async, push_job
 from shared.schemas import Job
@@ -25,6 +25,7 @@ from shared.schemas import Job
 from ..deps import dynamo as _dynamo
 from ..deps import redis_async as _redis_async
 from ..deps import redis_client as _redis
+from ..middleware.auth import current_customer_id
 
 
 log = logging.getLogger(__name__)
@@ -41,8 +42,8 @@ def _cache_key(customer_id: str, context: str) -> str:
 
 @router.get("/recommend")
 async def recommend(
-    customer_id: str = Query(..., min_length=1),
     context: str = Query(..., min_length=1),
+    customer_id: str = Depends(current_customer_id),
 ) -> dict:
     cache_key = _cache_key(customer_id, context)
 
