@@ -2,7 +2,8 @@
 
 Both endpoints share `_ingest_events`, which:
   - dedups within the batch by client_event_id (first occurrence wins)
-  - reads consent once per unique customer in the batch
+  - reads consent once for the auth'd customer (every event in a single
+    request belongs to the same JWT-resolved customer_id)
   - rejects events for ungated customers with status="rejected"
   - bulk-writes accepted events + jobs to DynamoDB (BatchWriteItem)
   - pipelined LPUSH of all jobs onto the worker queue
@@ -16,7 +17,7 @@ Idempotency:
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from shared.dynamo import DynamoClient
 from shared.queue import make_redis, push_jobs
@@ -30,6 +31,7 @@ from shared.schemas import (
 )
 
 from ..config import settings
+from ..middleware.auth import current_customer_id
 
 
 router = APIRouter()
@@ -37,18 +39,19 @@ _dynamo = DynamoClient(endpoint=settings.dynamodb_endpoint, region=settings.aws_
 _redis = make_redis(settings.redis_url)
 
 
-def _ingest_events(reqs: list[IngestEventRequest]) -> IngestBatchResponse:
+def _ingest_events(
+    customer_id: str,
+    reqs: list[IngestEventRequest],
+) -> IngestBatchResponse:
     # Dedup within the batch — first occurrence wins.
     by_id: dict[str, IngestEventRequest] = {}
     for r in reqs:
         by_id.setdefault(r.client_event_id, r)
     unique = list(by_id.values())
 
-    # One consent read per unique customer in the batch.
-    customers = {r.customer_id for r in unique}
-    consents: dict[str, dict | None] = {
-        cid: _dynamo.get_consent(cid) for cid in customers
-    }
+    # All events in a single request belong to the auth'd customer — one
+    # consent read covers the whole batch.
+    consent = _dynamo.get_consent(customer_id)
 
     now_epoch = int(datetime.now(timezone.utc).timestamp())
 
@@ -58,7 +61,6 @@ def _ingest_events(reqs: list[IngestEventRequest]) -> IngestBatchResponse:
     result_by_id: dict[str, IngestEventResult] = {}
 
     for r in unique:
-        consent = consents.get(r.customer_id)
         if not consent:
             result_by_id[r.client_event_id] = IngestEventResult(
                 client_event_id=r.client_event_id,
@@ -78,7 +80,7 @@ def _ingest_events(reqs: list[IngestEventRequest]) -> IngestBatchResponse:
         expires_at = now_epoch + retention_days * 86400
 
         event = CustomerEvent(
-            customer_id=r.customer_id,
+            customer_id=customer_id,
             event_id=r.client_event_id,
             event_type=r.event_type,
             payload=r.payload,
@@ -121,9 +123,12 @@ def _ingest_events(reqs: list[IngestEventRequest]) -> IngestBatchResponse:
 
 
 @router.post("/events", status_code=202)
-def ingest_event(req: IngestEventRequest) -> dict:
+def ingest_event(
+    req: IngestEventRequest,
+    customer_id: str = Depends(current_customer_id),
+) -> dict:
     """Singular endpoint, kept for backwards compat. Routes through the batch path."""
-    response = _ingest_events([req])
+    response = _ingest_events(customer_id, [req])
     result = response.results[0]
     if result.status == "rejected":
         raise HTTPException(status_code=403, detail=result.reason)
@@ -135,5 +140,8 @@ def ingest_event(req: IngestEventRequest) -> dict:
 
 
 @router.post("/events/batch", status_code=200)
-def ingest_event_batch(req: IngestBatchRequest) -> IngestBatchResponse:
-    return _ingest_events(req.events)
+def ingest_event_batch(
+    req: IngestBatchRequest,
+    customer_id: str = Depends(current_customer_id),
+) -> IngestBatchResponse:
+    return _ingest_events(customer_id, req.events)

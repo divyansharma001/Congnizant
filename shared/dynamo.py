@@ -9,6 +9,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 
 from .constants import (
+    TABLE_CUSTOMER_AUTH,
     TABLE_CUSTOMER_CONSENT,
     TABLE_CUSTOMER_EVENTS,
     TABLE_JOBS,
@@ -182,3 +183,26 @@ class DynamoClient:
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
+
+    # --- customer_auth -----------------------------------------------------
+
+    def put_auth(self, record: dict) -> None:
+        """Insert a new auth row. Raises ClientError (ConditionalCheckFailed)
+        if the email is already registered."""
+        email_key = record["email"].lower()
+        item = _strip_empty_sets({
+            "PK": f"EMAIL#{email_key}",
+            "SK": "AUTH",
+            **record,
+            "email": email_key,
+        })
+        self.table(TABLE_CUSTOMER_AUTH).put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(PK)",
+        )
+
+    def get_auth_by_email(self, email: str) -> dict | None:
+        resp = self.table(TABLE_CUSTOMER_AUTH).get_item(
+            Key={"PK": f"EMAIL#{email.lower()}", "SK": "AUTH"}
+        )
+        return resp.get("Item")
