@@ -5,8 +5,8 @@ from fastapi.responses import JSONResponse
 
 from shared.logging_config import configure_json_logging
 
-from .config import settings
-from .middleware.auth import APIKeyMiddleware
+from .middleware.auth import JWTAuthMiddleware
+from .routes import auth as auth_route
 from .routes import consent as consent_route
 from .routes import customer as customer_route
 from .routes import events as events_route
@@ -19,7 +19,7 @@ log = logging.getLogger("server")
 
 app = FastAPI(title="HyperPersona Server", version="0.13.0")
 
-app.add_middleware(APIKeyMiddleware, api_key=settings.api_key)
+app.add_middleware(JWTAuthMiddleware)
 
 
 @app.exception_handler(Exception)
@@ -31,6 +31,7 @@ async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+app.include_router(auth_route.router)
 app.include_router(consent_route.router)
 app.include_router(customer_route.router)
 app.include_router(events_route.router)

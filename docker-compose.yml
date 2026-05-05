@@ -21,6 +21,9 @@ services:
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
       API_KEY: ${API_KEY:-test-key}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
       TRACES_DB_PATH: /app/traces/agent_traces.db
     depends_on:
       - redis

@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 def utc_now_iso() -> str:
@@ -45,7 +45,7 @@ class Job(BaseModel):
 
 
 class IngestEventRequest(BaseModel):
-    customer_id: str
+    # customer_id is resolved server-side from the JWT (not client-supplied).
     # Frontend-supplied UUID. Same retry → same id → no duplicates downstream.
     client_event_id: str
     event_type: str
@@ -69,3 +69,26 @@ class IngestBatchResponse(BaseModel):
     accepted: int
     rejected: int
     results: list[IngestEventResult]
+
+
+class ConsentUpsertRequest(BaseModel):
+    scopes: set[str]
+    data_retention_days: int = 90
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class AuthResponse(BaseModel):
+    customer_id: str
+    email: str
+    token: str
+    token_type: str = "bearer"
+    expires_in: int
