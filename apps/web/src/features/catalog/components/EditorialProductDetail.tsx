@@ -16,8 +16,14 @@ import { tw } from "@/shared/ui/tw";
 type EditorialProductDetailProps = {
   product: Product;
   wishlisted: boolean;
+  /**
+   * Receives quantity + the selected variant context (color/size/storage/swatch).
+   * Callers should forward `variantContext` into both the cart mutation and
+   * the `add_to_cart` event so per-variant signals reach the worker.
+   */
   onAddToCart: (quantity: number, variantContext?: Record<string, string>) => void;
-  onWishlistToggle: () => void;
+  /** Same variant context for wishlist add — kept symmetric with cart. */
+  onWishlistToggle: (variantContext?: Record<string, string>) => void;
 };
 
 export function EditorialProductDetail({

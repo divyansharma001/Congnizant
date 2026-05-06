@@ -1,26 +1,43 @@
-import { useEffect, useRef, useState } from "react";
-
-import { formatConfidence } from "@/shared/lib/format";
-import type { RecommendationRail as RecommendationRailType } from "@/shared/api/contracts";
-import { useSpecTrack } from "@/features/events/specEvents";
-import { useTrackEvent } from "@/features/events/useTrackEvent";
-import { tw } from "@/shared/ui/tw";
+import { useEffect, useRef } from "react";
 
 import { ProductGrid } from "@/features/catalog/components/ProductGrid";
-import { RecommendationAuditDrawer } from "@/features/recommendations/components/RecommendationAuditDrawer";
+import { useSpecTrack } from "@/features/events/specEvents";
+import { useTrackEvent } from "@/features/events/useTrackEvent";
+import type { Product } from "@/shared/api/contracts";
+import { tw } from "@/shared/ui/tw";
 
 type RecommendationRailProps = {
-  rail: RecommendationRailType;
   /**
-   * The `/recommend?context=...` value this rail was rendered for. Required —
-   * we stamp it into `recommendation_clicked.source_context` so the backend
-   * can attribute clicks to the surface that produced them. Build with
+   * Products to render. Callers convert from the BE's `RecommendProduct[]`
+   * (or `Product[]` for non-`/recommend` surfaces like `/catalog/popular`)
+   * into the canonical `Product` shape that `ProductGrid` consumes.
+   */
+  products: Product[];
+  /**
+   * The `/recommend?context=...` value this rail was rendered for. Stamped
+   * into `recommendation_clicked.source_context` so backend analytics can
+   * attribute clicks to the surface that produced them. Build with
    * `Context.*` helpers, never hand-roll the string.
    */
   sourceContext: string;
+  /** Static rail heading chosen at the call site. */
+  title: string;
+  /** Optional eyebrow above the title (e.g. "Recommended for you"). */
+  subtitle?: string;
+  /**
+   * Prose under the title. Pass `personalization_reason` from the
+   * `/recommend` response when personalized; a static string when generic.
+   */
+  reason?: string;
+  /**
+   * Whether the BE ran a personalized path. Renders a "Generic mode" pill
+   * when false. Derived at the call site from `personalization_reason !== null`
+   * for `/recommend`, or hardcoded `false` for popular-products fallbacks.
+   */
+  personalized?: boolean;
   /**
    * `editorial` — home personalized strip (cream/white story).
-   * `pdp` — product page: same micro-label + prose as editorial, quieter confidence pill, pairing accent on cards.
+   * `pdp` — product page; same micro-label + prose with quieter chrome.
    */
   presentation?: "default" | "editorial" | "pdp";
 };
@@ -28,47 +45,53 @@ type RecommendationRailProps = {
 const pdpRailTitle =
   "font-display font-normal tracking-display text-balance text-ink antialiased leading-[1.06] text-[clamp(1.45rem,2.6vw,2.1rem)]";
 
-const confidencePillPdp =
-  "shrink-0 rounded-pill border border-outline/45 bg-white/55 px-3 py-2 text-center text-[0.65rem] font-semibold uppercase tracking-ui-wide text-ink/85 shadow-[0_6px_20px_rgba(34,28,23,0.05)] backdrop-blur-[6px]";
-
-export function RecommendationRail({ rail, sourceContext, presentation = "default" }: RecommendationRailProps) {
+export function RecommendationRail({
+  products,
+  sourceContext,
+  title,
+  subtitle,
+  reason,
+  personalized = true,
+  presentation = "default",
+}: RecommendationRailProps) {
   const track = useTrackEvent();
   const trackSpec = useSpecTrack();
-  const [auditOpen, setAuditOpen] = useState(false);
-  const impressionTrackedRef = useRef(false);
   const isEditorial = presentation === "editorial";
   const isPdp = presentation === "pdp";
   const isLanding = isEditorial || isPdp;
+  const cardAccent = isPdp ? (personalized ? "Curated pairing" : "Catalog fallback") : "Why this surfaced";
 
-  const cardAccent = isPdp ? (rail.fallback ? "Catalog fallback" : "Curated pairing") : "Why this surfaced";
-
+  const impressionTrackedRef = useRef(false);
   useEffect(() => {
     if (impressionTrackedRef.current) return;
+    if (products.length === 0) return;
     impressionTrackedRef.current = true;
     track({
       event_type: "recommendation_impression",
       payload: {
-        railId: rail.id,
-        title: rail.title,
-        fallback: rail.fallback,
-        confidence: rail.confidence,
+        title,
+        personalized,
         surface: presentation,
         source_context: sourceContext,
+        product_count: products.length,
       },
       consent_scope: ["analytics", "personalization"],
     });
-  }, [track, rail.id, rail.title, rail.fallback, rail.confidence, presentation, sourceContext]);
+  }, [track, title, personalized, presentation, sourceContext, products.length]);
+
+  if (products.length === 0) return null;
 
   return (
-    <>
-      <section className={`flex flex-col ${isLanding ? "gap-7 sm:gap-8" : "gap-5"}`}>
+    <section className={`flex flex-col ${isLanding ? "gap-7 sm:gap-8" : "gap-5"}`}>
       <div className={`${tw.flexBetween} flex-col gap-4 sm:flex-row sm:items-start`}>
         <div className={tw.stackSm}>
-          {isLanding ? (
-            <p className={`text-[0.7rem] font-semibold uppercase tracking-[0.18em] ${tw.muted}`}>{rail.subtitle}</p>
-          ) : (
-            <span className={tw.eyebrow}>{rail.subtitle}</span>
-          )}
+          {subtitle ? (
+            isLanding ? (
+              <p className={`text-[0.7rem] font-semibold uppercase tracking-[0.18em] ${tw.muted}`}>{subtitle}</p>
+            ) : (
+              <span className={tw.eyebrow}>{subtitle}</span>
+            )
+          ) : null}
           <h2
             className={
               isPdp
@@ -76,52 +99,39 @@ export function RecommendationRail({ rail, sourceContext, presentation = "defaul
                 : `${tw.displayH2} ${isEditorial ? "text-[clamp(1.5rem,2.8vw,2.25rem)] leading-[1.06]" : "text-2xl"}`
             }
           >
-            {rail.title}
+            {title}
           </h2>
-          <p
-            className={
-              isLanding
-                ? `max-w-3xl text-pretty text-sm leading-relaxed text-ink/88 sm:text-[0.9375rem] sm:leading-relaxed`
-                : tw.muted
-            }
-          >
-            {rail.reason}
-          </p>
+          {reason ? (
+            <p
+              className={
+                isLanding
+                  ? `max-w-3xl text-pretty text-sm leading-relaxed text-ink/88 sm:text-[0.9375rem] sm:leading-relaxed`
+                  : tw.muted
+              }
+            >
+              {reason}
+            </p>
+          ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className={isPdp ? confidencePillPdp : `${tw.chip} shrink-0`}>
-            {rail.fallback ? "Generic mode" : formatConfidence(rail.confidence)}
-          </span>
-          <button
-            type="button"
-            className={tw.buttonGhost}
-            onClick={() => {
-              setAuditOpen(true);
-              track({
-                event_type: "recommendation_audit_opened",
-                payload: { railId: rail.id, surface: presentation, source_context: sourceContext },
-                consent_scope: ["analytics", "personalization"],
-              });
-            }}
-          >
-            Audit
-          </button>
-        </div>
+        {!personalized ? (
+          <span className={`${tw.chip} shrink-0`}>Generic mode</span>
+        ) : null}
       </div>
       <ProductGrid
-        products={rail.products}
+        products={products}
         accent={cardAccent}
-        onProductClick={(product) =>
+        onProductClick={(product) => {
+          // Rail is pre-ranked, so position in `products` is the displayed rank.
+          const idx = products.findIndex((p) => p.id === product.id);
           trackSpec("recommendation_clicked", {
             product_id: product.id,
             category: product.category,
             source_context: sourceContext,
-          })
-        }
+            personalized,
+            ...(idx >= 0 ? { rank: idx + 1 } : {}),
+          });
+        }}
       />
-      </section>
-      <RecommendationAuditDrawer rail={rail} open={auditOpen} onClose={() => setAuditOpen(false)} />
-    </>
+    </section>
   );
 }
-

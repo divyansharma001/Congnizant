@@ -11,6 +11,7 @@ import type {
   Category,
   CheckoutInput,
   CheckoutResponse,
+  ComplementResponse,
   ConsentRecord,
   CreateProductReviewBody,
   CreateProductReviewResponse,
@@ -25,7 +26,7 @@ import type {
   ProductListResponse,
   ProductReviewsResponse,
   ProfileSummary,
-  RecommendationRail,
+  RecommendResponse,
   RegisterRequest,
   SetReviewHelpfulBody,
   SetReviewHelpfulResponse,
@@ -173,13 +174,30 @@ export const apiClient = {
 
   // --- Recommendations ---
   /**
-   * Unified recommendation endpoint. Pass a context string from
-   * `Context.*` helpers ([apps/web/src/features/events/contexts.ts]) — never
-   * hand-build the value, since the server caches per (customer_id, context_hash)
-   * for 5 minutes and ad-hoc strings would balloon the keyspace.
+   * Personalized rail. Pass a context string from `Context.*` helpers
+   * ([apps/web/src/features/events/contexts.ts]) — never hand-build the
+   * value, since the server caches per (customer_id, context_hash) for
+   * 5 minutes and ad-hoc strings balloon the keyspace.
+   *
+   * Response includes a ranked `products[]`, a `personalization_reason`
+   * subtitle (null when generic), and the AI `offer` text the FE can
+   * surface as an editorial banner.
    */
   getRecommendation: (context: string) =>
-    request<RecommendationRail>(`/recommend?context=${encodeURIComponent(context)}`),
+    request<RecommendResponse>(`/recommend?context=${encodeURIComponent(context)}`),
+  /**
+   * Cart-driven "frequently bought together" rail. Pass the product ids
+   * currently in the cart (comma-separated server-side), optional limit
+   * up to 10. Response is a lighter shape — no images / brand / rating —
+   * so render a text-forward "list" tile rather than the catalog grid.
+   */
+  getComplementRecommendation: (cartItems: string[], limit = 5) => {
+    const params = new URLSearchParams({
+      cart_items: cartItems.join(","),
+      limit: String(limit),
+    });
+    return request<ComplementResponse>(`/recommend/complement?${params.toString()}`);
+  },
 
   // --- Consent / profile ---
   getConsent: () => request<ConsentRecord>("/consent"),

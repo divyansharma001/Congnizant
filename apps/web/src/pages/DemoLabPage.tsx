@@ -6,7 +6,7 @@ import { usePersonaStore } from "@/features/personas/store";
 import { Context } from "@/features/events/contexts";
 import { useTrackEvent } from "@/features/events/useTrackEvent";
 import { apiClient } from "@/shared/api/client";
-import type { RecommendationRail } from "@/shared/api/contracts";
+import type { RecommendResponse } from "@/shared/api/contracts";
 import { tw } from "@/shared/ui/tw";
 
 type DemoScenario = {
@@ -41,30 +41,36 @@ const scenarios: DemoScenario[] = [
   },
 ];
 
-function toGenericRail(rail: RecommendationRail | undefined): RecommendationRail | null {
+type SnapshotShape = {
+  reason: string;
+  personalized: boolean;
+  productNames: string[];
+};
+
+function toSnapshot(rail: RecommendResponse | undefined, generic: boolean): SnapshotShape | null {
   if (!rail) return null;
   return {
-    ...rail,
-    fallback: true,
-    confidence: 0.5,
-    reason: "Generic merchandising fallback (no personalization signal applied).",
+    reason: generic
+      ? "Generic merchandising fallback (no personalization signal applied)."
+      : rail.personalization_reason ?? "Personalized rail (no reason text returned).",
+    personalized: !generic && Boolean(rail.personalization_reason),
+    productNames: rail.products.slice(0, 3).map((p) => p.name),
   };
 }
 
-function RailSnapshot({ title, rail }: { title: string; rail: RecommendationRail | null }) {
+function RailSnapshot({ title, snapshot }: { title: string; snapshot: SnapshotShape | null }) {
   return (
     <section className="rounded-card border border-outline/25 bg-white/65 p-4 sm:p-5">
       <p className={`text-[0.65rem] font-semibold uppercase tracking-[0.16em] ${tw.muted}`}>{title}</p>
       <ul className="m-0 mt-3 list-none space-y-2 p-0">
-        {rail ? (
-          <li key={`${title}-${rail.id}`} className="rounded-md border border-outline/15 bg-white/60 px-3 py-2.5">
-            <p className="text-sm font-medium text-ink/90">{rail.title}</p>
-            <p className={`mt-1 text-[0.78rem] leading-relaxed ${tw.muted}`}>{rail.reason}</p>
+        {snapshot ? (
+          <li className="rounded-md border border-outline/15 bg-white/60 px-3 py-2.5">
+            <p className={`text-[0.78rem] leading-relaxed ${tw.muted}`}>{snapshot.reason}</p>
             <p className={`mt-1 text-[0.72rem] ${tw.muted}`}>
-              {rail.fallback ? "Generic fallback" : `Confidence ${(rail.confidence * 100).toFixed(0)}%`}
+              {snapshot.personalized ? "Personalized" : "Generic fallback"}
             </p>
             <p className="mt-1 text-[0.75rem] text-ink/85">
-              {rail.products.slice(0, 3).map((p) => p.name).join(" · ")}
+              {snapshot.productNames.join(" · ") || "(no products)"}
             </p>
           </li>
         ) : (
@@ -161,8 +167,7 @@ export function DemoLabPage() {
   const homepageContext = Context.homepage();
   const recommendationQuery = useQuery({
     queryKey: ["recommend", homepageContext],
-    // queryFn: () => apiClient.getRecommendation(homepageContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(homepageContext),
   });
   const consentQuery = useQuery({
     queryKey: ["consent"],
@@ -179,10 +184,11 @@ export function DemoLabPage() {
     [activeScenarioId],
   );
 
-  const personalizedRail = recommendationQuery.data ?? null;
-  const genericRail = toGenericRail(recommendationQuery.data);
-  const personalizedCount = personalizedRail && !personalizedRail.fallback ? 1 : 0;
-  const genericCount = personalizedRail && personalizedRail.fallback ? 1 : 0;
+  const personalizedSnapshot = toSnapshot(recommendationQuery.data, false);
+  const genericSnapshot = toSnapshot(recommendationQuery.data, true);
+  const isPersonalized = Boolean(recommendationQuery.data?.personalization_reason);
+  const personalizedCount = isPersonalized ? 1 : 0;
+  const genericCount = recommendationQuery.data && !isPersonalized ? 1 : 0;
 
   return (
     <div className={`${tw.stackLg} min-h-[min(80vh,920px)] pt-8 sm:pt-10 lg:pt-12 pb-12 sm:pb-14 lg:pb-16`}>
@@ -236,8 +242,8 @@ export function DemoLabPage() {
 
       <section className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center" aria-label="Step 2 comparison">
         <div className="grid gap-4 lg:grid-cols-2">
-          <RailSnapshot title="Generic comparison snapshot" rail={genericRail} />
-          <RailSnapshot title="Personalized comparison snapshot" rail={personalizedRail} />
+          <RailSnapshot title="Generic comparison snapshot" snapshot={genericSnapshot} />
+          <RailSnapshot title="Personalized comparison snapshot" snapshot={personalizedSnapshot} />
         </div>
         <aside className="hidden lg:flex lg:flex-col lg:items-center lg:gap-3">
           <img

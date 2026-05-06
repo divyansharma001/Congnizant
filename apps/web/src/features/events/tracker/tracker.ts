@@ -86,8 +86,10 @@ function ensureSessionId(): string {
   }
 }
 
-function isPersonalizationGranted(scopes: string[]): boolean {
-  return scopes.includes("personalization");
+function intersectScopes(requested: string[], granted: string[]): string[] {
+  if (requested.length === 0) return [];
+  const grantedSet = new Set(granted);
+  return requested.filter((s) => grantedSet.has(s));
 }
 
 function backoffDelay(attempts: number): number {
@@ -117,9 +119,10 @@ function scheduleFlush(delayMs = FLUSH_DEBOUNCE_MS): void {
 
 /**
  * Update the consent snapshot. Called from a React bridge that observes the
- * consent query. Events enqueued before this is set carry `[]` and the server
- * will reject them with `missing_personalization_scope` — at which point we
- * stop retrying them (see `flushPending` rejection handling).
+ * consent query. Used by `trackEvent` to gate enqueue: an event is dropped
+ * locally only if the intersection of its declared `consent_scope` and this
+ * snapshot is empty. Events that survive the intersection ship the
+ * intersected scope list on the wire so the server stores the right thing.
  */
 export function setConsentSnapshot(scopes: string[]): void {
   consentSnapshot = scopes.slice();
@@ -132,9 +135,12 @@ export function getConsentSnapshot(): string[] {
 
 /**
  * Enqueue a tracking event. Fire-and-forget — never throws to the caller.
- * Drops events when the user has not granted `personalization` consent
- * because the server would reject them anyway and we don't want to burn
- * IDB rows on doomed payloads.
+ * Drops events whose declared scopes share nothing with the customer's
+ * granted scopes, because the server would reject them anyway and we don't
+ * want to burn IDB rows on doomed payloads. Surviving events ship the
+ * intersected scope list on the wire so the server records what the event
+ * is actually allowed to be used for (matches the per-event scope check
+ * in `server/src/routes/events.py`).
  */
 export function trackEvent(input: TrackInput): void {
   if (typeof window === "undefined") return;
@@ -143,10 +149,14 @@ export function trackEvent(input: TrackInput): void {
   // dedupe cache is a best-effort guard, not a hard contract.
   if (shouldDropAsDuplicate(input.event_type, input.payload)) return;
 
-  const scopes = (input.consent_scope?.length ? input.consent_scope : consentSnapshot).slice();
-  if (!isPersonalizationGranted(scopes)) {
-    // Without personalization scope the server rejects everything in the
-    // batch (see `server/src/routes/events.py`). Drop early.
+  // Default to {"analytics"} when the caller doesn't declare a scope, since
+  // every event is at minimum a recordable analytics signal.
+  const requested = input.consent_scope?.length ? input.consent_scope : ["analytics"];
+  const scopes = intersectScopes(requested, consentSnapshot);
+  if (scopes.length === 0) {
+    // Snapshot grants none of the scopes this event needs. Either the user
+    // has no consent record yet, or they've revoked the relevant scope —
+    // drop instead of queuing a payload the server will reject.
     return;
   }
 

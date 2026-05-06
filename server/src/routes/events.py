@@ -4,7 +4,12 @@ Both endpoints share `_ingest_events`, which:
   - dedups within the batch by client_event_id (first occurrence wins)
   - reads consent once for the auth'd customer (every event in a single
     request belongs to the same JWT-resolved customer_id)
-  - rejects events for ungated customers with status="rejected"
+  - per-event scope check: accepts if the intersection of the event's
+    declared `consent_scope` and the customer's granted scopes is
+    non-empty. The stored event carries that intersection so downstream
+    consumers know what they're allowed to do with each row. Worker-side
+    gates (privacy_tool.py) still independently require `personalization`
+    before using events for ranking.
   - bulk-writes accepted events + jobs to DynamoDB (BatchWriteItem)
   - pipelined LPUSH of all jobs onto the worker queue
 
@@ -85,6 +90,8 @@ def _ingest_events(
 
     now_epoch = int(datetime.now(timezone.utc).timestamp())
 
+    granted_scopes: set[str] = set(consent.get("scopes") or set()) if consent else set()
+
     accepted_events: list[dict] = []
     accepted_jobs: list[dict] = []
     accepted_payloads: list[str] = []
@@ -92,17 +99,33 @@ def _ingest_events(
 
     for r in unique:
         if not consent:
+            # No record at all — surface a distinct reason so the FE can
+            # prompt setup instead of silently dropping events forever.
             result_by_id[r.client_event_id] = IngestEventResult(
                 client_event_id=r.client_event_id,
                 status="rejected",
                 reason="no_consent_record",
             )
             continue
-        if "personalization" not in (consent.get("scopes") or set()):
+
+        # Per-event scope check. The event declares which scopes it would use
+        # (analytics for recording/funnels, personalization for ranking, etc.);
+        # we accept if the customer has granted at least one. This decouples
+        # ingest (analytics) from recommendation use (personalization, gated
+        # separately by privacy_tool.py at the worker layer).
+        #
+        # An event with no declared scope falls back to {"analytics"} — every
+        # event is at minimum an analytics signal. The stored consent_scope
+        # is the intersection, so the worker knows what it's allowed to do
+        # with each row even if the customer later revokes a scope.
+        requested = set(r.consent_scope or set()) or {"analytics"}
+        effective = requested & granted_scopes
+        if not effective:
+            missing = sorted(requested - granted_scopes)
             result_by_id[r.client_event_id] = IngestEventResult(
                 client_event_id=r.client_event_id,
                 status="rejected",
-                reason="missing_personalization_scope",
+                reason=f"missing_scope:{','.join(missing)}",
             )
             continue
 
@@ -125,7 +148,7 @@ def _ingest_events(
             event_id=r.client_event_id,
             event_type=r.event_type,
             payload=r.payload,
-            consent_scope=r.consent_scope,
+            consent_scope=effective,
             expires_at=expires_at,
         )
         job = Job(

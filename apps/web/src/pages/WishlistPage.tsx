@@ -4,8 +4,10 @@ import { Link } from "react-router-dom";
 import { prefetchProductPageChunk } from "@/app/routeChunks";
 import { CatalogProductGridSkeleton } from "@/features/catalog/components/CatalogSkeletons";
 import { Context } from "@/features/events/contexts";
+import { fromWishlistLine } from "@/features/events/payloads";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { useRemoveFromWishlist, useWishlistQuery } from "@/features/wishlist/useWishlist";
 import { apiClient } from "@/shared/api/client";
 import type { WishlistLine } from "@/shared/api/contracts";
@@ -97,16 +99,12 @@ export function WishlistPage() {
   const wishlistContext = Context.wishlist();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", wishlistContext],
-    // queryFn: () => apiClient.getRecommendation(wishlistContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(wishlistContext),
     enabled: ready,
   });
 
   const handleRemove = (line: WishlistLine) => {
-    trackSpec("wishlist_remove", {
-      product_id: line.productId,
-      category: "",
-    });
+    trackSpec("wishlist_remove", fromWishlistLine(line));
     removeMutation.mutate(line.productId);
   };
 
@@ -165,10 +163,14 @@ export function WishlistPage() {
         </div>
       )}
 
-      {ready && recommendationsQuery.data ? (
+      {ready && recommendationsQuery.data && recommendationsQuery.data.products.length > 0 ? (
         <RecommendationRail
-          rail={recommendationsQuery.data}
+          products={recommendProductsToProducts(recommendationsQuery.data.products)}
           sourceContext={wishlistContext}
+          title="More to consider"
+          subtitle="Recommended"
+          reason={recommendationsQuery.data.personalization_reason ?? undefined}
+          personalized={Boolean(recommendationsQuery.data.personalization_reason)}
           presentation="default"
         />
       ) : null}

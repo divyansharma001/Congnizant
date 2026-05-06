@@ -8,6 +8,7 @@ import { HomeEditorialClosingSection } from "@/features/home/components/HomeEdit
 import { ShopperContextEditorialSection } from "@/features/home/components/ShopperContextEditorialSection";
 import { Context } from "@/features/events/contexts";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { apiClient } from "@/shared/api/client";
 import { tw } from "@/shared/ui/tw";
 
@@ -15,18 +16,18 @@ export function HomePage() {
   const homepageContext = Context.homepage();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", homepageContext],
-    // queryFn: () => apiClient.getRecommendation(homepageContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(homepageContext),
   });
 
+  const personalized = Boolean(recommendationsQuery.data?.personalization_reason);
   const recommendationMode: "loading" | "personalized" | "generic" | "cold-start" =
     recommendationsQuery.isLoading || recommendationsQuery.isPending
       ? "loading"
-      : !recommendationsQuery.data
+      : !recommendationsQuery.data || recommendationsQuery.data.products.length === 0
         ? "cold-start"
-        : recommendationsQuery.data.fallback
-          ? "generic"
-          : "personalized";
+        : personalized
+          ? "personalized"
+          : "generic";
 
   return (
     <div className="flex flex-col gap-0">
@@ -39,10 +40,14 @@ export function HomePage() {
       <HomePersonalizedSection mode={recommendationMode}>
         {recommendationsQuery.isLoading ? (
           <p className={`text-sm ${tw.muted}`}>Loading personalized picks…</p>
-        ) : recommendationsQuery.data ? (
+        ) : recommendationsQuery.data && recommendationsQuery.data.products.length > 0 ? (
           <RecommendationRail
-            rail={recommendationsQuery.data}
+            products={recommendProductsToProducts(recommendationsQuery.data.products)}
             sourceContext={homepageContext}
+            title="Picks shaped by your signals"
+            subtitle="Recommended for you"
+            reason={recommendationsQuery.data.personalization_reason ?? undefined}
+            personalized={personalized}
             presentation="editorial"
           />
         ) : null}

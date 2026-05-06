@@ -13,6 +13,7 @@ import { Context } from "@/features/events/contexts";
 import { useDebugEventStore } from "@/features/events/debug/store";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { SearchInsightPanel, SearchInsightPanelSkeleton } from "@/features/search/components/SearchInsightPanel";
 import { useFacetStripBusyForScopeChange } from "../features/catalog/hooks/useFacetStripBusyForScopeChange";
 import { useSearchFacets } from "@/features/catalog/hooks/useSearchFacets";
@@ -102,6 +103,7 @@ export function SearchPageListing() {
       category: q || "search",
       filter_type: "sort",
       filter_value: nextSort,
+      surface: "search",
     });
   };
 
@@ -118,6 +120,7 @@ export function SearchPageListing() {
       category: q || "search",
       filter_type: "vertical",
       filter_value: nextVertical || "all",
+      surface: "search",
     });
   };
 
@@ -134,6 +137,7 @@ export function SearchPageListing() {
       category: q || "search",
       filter_type: "free_delivery",
       filter_value: only ? "true" : "false",
+      surface: "search",
     });
   };
 
@@ -171,7 +175,12 @@ export function SearchPageListing() {
     const stamp = `${q}::${query.data.total}`;
     if (lastTrackedSearchRef.current === stamp) return;
     lastTrackedSearchRef.current = stamp;
-    trackSpec("search", { query: q, results_count: query.data.total });
+    trackSpec("search", {
+      query: q,
+      results_count: query.data.total,
+      page: Number(page) || 1,
+      sort: params.get("sort") ?? "relevance",
+    });
   }, [q, page, query.data, trackSpec]);
 
   // Pick a `/recommend` context: `no_results` when the query came back empty,
@@ -181,8 +190,7 @@ export function SearchPageListing() {
   const searchContext = isEmptyResults ? Context.noResults() : Context.search();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", searchContext],
-    // queryFn: () => apiClient.getRecommendation(searchContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(searchContext),
     enabled: q.length > 0 && Boolean(query.data),
   });
 
@@ -271,7 +279,7 @@ export function SearchPageListing() {
 
           {query.data.items.length > 0 && totalPages > 1 ? (
             <nav
-              className={`${tw.labPanel} mt-2 flex flex-wrap items-center justify-center gap-4 border-t border-outline/12 pt-6 sm:pt-7`}
+              className="mt-4 flex flex-wrap items-center justify-center gap-4 border-t border-outline/15 pt-6 sm:pt-7"
               aria-label="Search results pagination"
             >
               <button
@@ -296,10 +304,14 @@ export function SearchPageListing() {
             </nav>
           ) : null}
 
-          {recommendationsQuery.data ? (
+          {recommendationsQuery.data && recommendationsQuery.data.products.length > 0 ? (
             <RecommendationRail
-              rail={recommendationsQuery.data}
+              products={recommendProductsToProducts(recommendationsQuery.data.products)}
               sourceContext={searchContext}
+              title={isEmptyResults ? "Try one of these instead" : "You might also like"}
+              subtitle={isEmptyResults ? "No results" : "Sponsored slot"}
+              reason={recommendationsQuery.data.personalization_reason ?? undefined}
+              personalized={Boolean(recommendationsQuery.data.personalization_reason)}
               presentation="default"
             />
           ) : null}

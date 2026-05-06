@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { Context } from "@/features/events/contexts";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { apiClient } from "@/shared/api/client";
 import { tw } from "@/shared/ui/tw";
 
@@ -38,8 +39,7 @@ export function NotFoundPage() {
   const noResultsContext = Context.noResults();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", noResultsContext],
-    // queryFn: () => apiClient.getRecommendation(noResultsContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(noResultsContext),
   });
 
   return (
@@ -67,11 +67,15 @@ export function NotFoundPage() {
         </Link>
       </div>
 
-      {recommendationsQuery.data ? (
+      {recommendationsQuery.data && recommendationsQuery.data.products.length > 0 ? (
         <div className="mt-12 w-full max-w-5xl text-left">
           <RecommendationRail
-            rail={recommendationsQuery.data}
+            products={recommendProductsToProducts(recommendationsQuery.data.products)}
             sourceContext={noResultsContext}
+            title="While you're here, take a look at these"
+            subtitle="Curated"
+            reason={recommendationsQuery.data.personalization_reason ?? undefined}
+            personalized={Boolean(recommendationsQuery.data.personalization_reason)}
             presentation="default"
           />
         </div>

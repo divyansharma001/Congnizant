@@ -138,6 +138,13 @@ export type SetReviewHelpfulResponse = {
 /**
  * Canonical `event_type` strings for review-related `POST /events` payloads (see API_REQUIREMENTS.md).
  * Payload shapes are intentionally loose on `IngestEventRequest` but typed here for callers.
+ *
+ * All review payloads carry the **product snapshot** (productId, productName,
+ * category, price, brand, rating…) so the worker can attribute review activity
+ * back to the right product without an extra catalog lookup. Shapes use
+ * snake_case for snapshot fields to match the `ProductSnapshot` wire shape
+ * built by `apps/web/src/features/events/payloads.ts`; keep camelCase for
+ * the legacy keys (productId/slug) so existing consumers don't break.
  */
 export type ReviewTelemetryEventType =
   | "product_reviews_viewed"
@@ -145,12 +152,65 @@ export type ReviewTelemetryEventType =
   | "product_review_submitted"
   | "product_review_engagement";
 
+/** Subset of `ProductSnapshot` we stamp onto every review event. */
+export type ReviewProductContext = {
+  product_id: string;
+  product_name: string;
+  category: string;
+  slug?: string;
+  price?: number;
+  brand?: string;
+  vertical?: string;
+  rating?: number;
+  review_count?: number;
+};
+
+/** Subset of `ReviewSnapshot` shipped on submit/engagement. */
+export type ReviewContext = {
+  review_id: string;
+  rating: number;
+  title?: string;
+  /** Truncated body — full text is stored server-side via the create endpoint. */
+  body?: string;
+  body_length?: number;
+  verified_purchase?: boolean;
+};
+
 export type ReviewTelemetryPayload = {
-  product_reviews_viewed: { productId: string; slug: string; reviewCountShown: number };
-  product_reviews_page_loaded: { productId: string; slug: string; page: number; pageSize: number };
-  product_review_submitted: { productId: string; slug: string; reviewId: string; rating: number };
-  /** Helpful / not helpful on another shopper’s review (UGC engagement). */
-  product_review_engagement: { productId: string; slug: string; reviewId: string; vote: ReviewHelpfulVote };
+  product_reviews_viewed: ReviewProductContext & {
+    /** How many reviews are visible right now (after page filter). */
+    review_count_shown: number;
+    /** Average rating displayed alongside (mirrors `Product.rating`). */
+    average_rating?: number;
+  };
+  product_reviews_page_loaded: ReviewProductContext & {
+    page: number;
+    page_size: number;
+    /** Number of rows actually returned for this page. */
+    rows_returned?: number;
+  };
+  /**
+   * The shopper just published their own review. Carry the full review
+   * payload (rating, title, body excerpt, length, verified flag) AND the
+   * product snapshot, so the worker can use review sentiment + content as
+   * a profile signal without re-fetching from DDB.
+   */
+  product_review_submitted: ReviewProductContext & ReviewContext & {
+    /** Whether the submission replaced the shopper's prior review. */
+    is_update?: boolean;
+  };
+  /**
+   * UGC engagement — the shopper voted helpful / not_helpful on another
+   * shopper's review. Carry both the target review's context (so we can
+   * tell which kind of reviews they trust) and the host product snapshot.
+   */
+  product_review_engagement: ReviewProductContext & {
+    review_id: string;
+    /** Author display name of the target review — useful for trust-graph features. */
+    review_author_display_name?: string;
+    review_rating?: number;
+    vote: ReviewHelpfulVote;
+  };
 };
 
 /**
@@ -279,16 +339,74 @@ export type AddWishlistItemBody = {
   productId: string;
 };
 
-export type RecommendationRail = {
-  id: string;
-  title: string;
-  subtitle: string;
+/**
+ * `/recommend?context=...` response — mirrors the worker's
+ * `generate_recommendation` tool output. The `products` array holds the
+ * ranked rail; `personalization_reason` is the rail's human-readable subtitle
+ * when personalization is on (null when generic). The `offer` field is an
+ * AI-generated paragraph the FE can show as an editorial banner — not used
+ * today, but kept on the type so consumers can pick it up later.
+ */
+export type RecommendProduct = {
+  product_id: string;
+  name: string;
+  brand: string;
+  category: string;
+  vertical?: string;
+  price: number;
+  compareAt?: number | null;
+  image: string;
+  rating: number;
+  reviewCount: number;
+  badges: string[];
+  tags: string[];
+  personalizationTags: string[];
+  inventoryStatus: "in-stock" | "low-stock" | "backorder";
+  rank: number;
+};
+
+export type RecommendResponse = {
+  products: RecommendProduct[];
+  offer: string;
+  personalization_reason: string | null;
+  verifier_status: string;
+  facts_retrieved: number;
+  facts_used: number;
+  behaviors_used: number;
+  summaries_used: number;
+  conflicts: unknown[];
+  candidates_considered: number;
+  job_id: string;
+  cached: boolean;
+};
+
+/**
+ * `/recommend/complement?cart_items=...` response — lighter shape than
+ * `/recommend` (no image, no brand, no rating). Designed for "frequently
+ * bought together" surfaces where the rail is text-forward rather than
+ * tile-driven.
+ */
+export type ComplementProduct = {
+  product_id: string;
+  name: string;
+  category: string;
+  vertical?: string;
+  price: number;
   reason: string;
-  confidence: number;
-  fallback: boolean;
-  products: Product[];
-  /** True when the response came from the 5-minute Redis cache (server-stamped). */
-  cached?: boolean;
+  personalization_reason: string | null;
+  fact_ref: string | null;
+  rank: number;
+};
+
+export type ComplementResponse = {
+  recommendations: ComplementProduct[];
+  cart_items: string[];
+  used_llm: boolean;
+  cart_resolved: number;
+  candidates_considered: number;
+  facts_used: number;
+  job_id: string;
+  cached: boolean;
 };
 
 /**
@@ -364,7 +482,13 @@ export type TrackedEvent = {
   payload: Record<string, unknown>;
   status: "queued" | "sent" | "rejected";
   created_at: string;
-  /** Server reason when status === "rejected" (e.g. `missing_personalization_scope`). */
+  /**
+   * Server reason when status === "rejected". Known values:
+   *   - "no_consent_record"          — customer has never set consent.
+   *   - "missing_scope:<a>[,<b>]"    — granted scopes don't intersect with
+   *     the event's declared `consent_scope` (see server/src/routes/events.py).
+   *   - "customer_rate_limit"        — over the per-customer/min budget.
+   */
   reason?: string;
 };
 

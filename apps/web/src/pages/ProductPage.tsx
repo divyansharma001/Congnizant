@@ -6,10 +6,16 @@ import { EditorialProductDetail } from "@/features/catalog/components/EditorialP
 import { ProductDetailSkeleton } from "@/features/catalog/components/CatalogSkeletons";
 import { useAddToCart } from "@/features/cart/useCart";
 import { Context } from "@/features/events/contexts";
+import {
+  productSnapshot,
+  rememberProduct,
+  variantSnapshot,
+} from "@/features/events/payloads";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { usePdpDwell } from "@/features/events/usePdpDwell";
 import { ProductSuggestionsSection } from "@/features/recommendations/components/ProductSuggestionsSection";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { pushToast } from "@/features/toast/store";
 import {
   useAddToWishlist,
@@ -44,8 +50,7 @@ export function ProductPage() {
   const productPageContext = productCategory ? Context.productPage(productCategory) : "";
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", productPageContext],
-    // queryFn: () => apiClient.getRecommendation(productPageContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(productPageContext),
     enabled: productPageContext.length > 0,
   });
 
@@ -55,14 +60,12 @@ export function ProductPage() {
   const viewedSlugRef = useRef<string | null>(null);
   useEffect(() => {
     if (!product) return;
+    // Stamp the full snapshot so cart/wishlist remove events later in the
+    // session carry brand/rating/freeDelivery/etc. without re-fetching.
+    rememberProduct(productSnapshot(product));
     if (viewedSlugRef.current === product.slug) return;
     viewedSlugRef.current = product.slug;
-    trackSpec("product_view", {
-      product_id: product.id,
-      product_name: product.name,
-      category: product.category,
-      price: product.price,
-    });
+    trackSpec("product_view", productSnapshot(product));
   }, [product, trackSpec]);
 
   // `product_dwell` — 10s threshold, once per page load, paused when tab hidden.
@@ -95,29 +98,33 @@ export function ProductPage() {
       <EditorialProductDetail
         product={product}
         wishlisted={wishlisted}
-        onAddToCart={(quantity) => {
-          addToCart.mutate({ productId: product.id, quantity });
+        onAddToCart={(quantity, variantContext) => {
+          const variant = variantSnapshot(variantContext);
+          addToCart.mutate({
+            productId: product.id,
+            quantity,
+            ...(variantContext && Object.keys(variantContext).length > 0
+              ? { selectedOptions: variantContext }
+              : {}),
+          });
           pushToast(
             quantity > 1
               ? `Bag updated · ${truncateToastLabel(product.name)} ×${quantity}`
               : `Added to bag · ${truncateToastLabel(product.name)}`,
           );
           trackSpec("add_to_cart", {
-            product_id: product.id,
-            product_name: product.name,
-            category: product.category,
-            price: product.price,
+            ...productSnapshot(product),
             quantity,
+            source: "pdp",
+            ...(variant ? { variant } : {}),
           });
         }}
-        onWishlistToggle={() => {
+        onWishlistToggle={(variantContext) => {
+          const variant = variantSnapshot(variantContext);
           if (wishlisted) {
             removeFromWishlist.mutate(product.id);
             pushToast(`Removed from wishlist · ${truncateToastLabel(product.name)}`);
-            trackSpec("wishlist_remove", {
-              product_id: product.id,
-              category: product.category,
-            });
+            trackSpec("wishlist_remove", productSnapshot(product));
           } else {
             addToWishlist.mutate({
               productId: product.id,
@@ -130,20 +137,25 @@ export function ProductPage() {
             });
             pushToast(`Saved to wishlist · ${truncateToastLabel(product.name)}`);
             trackSpec("wishlist_add", {
-              product_id: product.id,
-              product_name: product.name,
-              category: product.category,
+              ...productSnapshot(product),
+              source: "pdp",
+              ...(variant ? { variant } : {}),
             });
           }
         }}
       />
       <ProductSuggestionsSection isLoading={recommendationsQuery.isLoading}>
-        {!recommendationsQuery.isLoading && !recommendationsQuery.data ? (
+        {!recommendationsQuery.isLoading &&
+        (!recommendationsQuery.data || recommendationsQuery.data.products.length === 0) ? (
           <p className={`text-sm ${tw.muted}`}>No suggestion rails returned for this product yet.</p>
         ) : recommendationsQuery.data ? (
           <RecommendationRail
-            rail={recommendationsQuery.data}
+            products={recommendProductsToProducts(recommendationsQuery.data.products)}
             sourceContext={productPageContext}
+            title="Pieces that complete the story"
+            subtitle="Suggested next"
+            reason={recommendationsQuery.data.personalization_reason ?? undefined}
+            personalized={Boolean(recommendationsQuery.data.personalization_reason)}
             presentation="pdp"
           />
         ) : null}

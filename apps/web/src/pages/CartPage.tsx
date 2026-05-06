@@ -9,8 +9,11 @@ import {
   useUpdateCartItem,
 } from "@/features/cart/useCart";
 import { Context } from "@/features/events/contexts";
+import { fromCartLine, variantSnapshot } from "@/features/events/payloads";
 import { useSpecTrack } from "@/features/events/specEvents";
+import { ComplementRail } from "@/features/recommendations/components/ComplementRail";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { apiClient } from "@/shared/api/client";
 import type { CartLine as CartLineType } from "@/shared/api/contracts";
 import { formatCurrency } from "@/shared/lib/format";
@@ -142,15 +145,29 @@ export function CartPage() {
   const cartContext = hasItems ? Context.cartActive() : Context.cartEmpty();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", cartContext],
-    // queryFn: () => apiClient.getRecommendation(cartContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(cartContext),
     enabled: ready,
   });
 
+  // Frequently bought together — only meaningful when the cart has items.
+  // Re-keyed by the sorted list of productIds so different cart states get
+  // different cache entries (matches the BE's cache key derivation).
+  const cartProductIds = items.map((line) => line.productId);
+  const complementCacheKey = [...cartProductIds].sort().join(",");
+  const complementQuery = useQuery({
+    queryKey: ["recommend-complement", complementCacheKey],
+    queryFn: () => apiClient.getComplementRecommendation(cartProductIds, 6),
+    enabled: ready && hasItems,
+    staleTime: 5 * 60 * 1000, // matches BE Redis TTL
+  });
+
   const handleRemove = (line: CartLineType) => {
+    const variant = variantSnapshot(line.selectedOptions ?? undefined);
     trackSpec("remove_from_cart", {
-      product_id: line.productId,
-      category: "",
+      ...fromCartLine(line),
+      quantity_removed: line.quantity,
+      line_total: line.unitPrice * line.quantity,
+      ...(variant ? { variant } : {}),
     });
     removeMutation.mutate(line.productId);
   };
@@ -158,6 +175,17 @@ export function CartPage() {
   const handleBumpQty = (line: CartLineType, delta: number) => {
     const next = Math.min(20, Math.max(1, line.quantity + delta));
     if (next === line.quantity) return;
+    const variant = variantSnapshot(line.selectedOptions ?? undefined);
+    // Per-click — the tracker's dedup window (`shouldDropAsDuplicate`) folds
+    // bursts of identical clicks. Both the old + new quantity ship so the
+    // worker can compute a stronger demand signal than just "added once".
+    trackSpec("cart_quantity_changed", {
+      ...fromCartLine(line),
+      quantity_old: line.quantity,
+      quantity_new: next,
+      delta: next - line.quantity,
+      ...(variant ? { variant } : {}),
+    });
     updateMutation.mutate({ productId: line.productId, body: { quantity: next } });
   };
 
@@ -233,12 +261,20 @@ export function CartPage() {
         </div>
       )}
 
-      {ready && recommendationsQuery.data ? (
+      {ready && recommendationsQuery.data && recommendationsQuery.data.products.length > 0 ? (
         <RecommendationRail
-          rail={recommendationsQuery.data}
+          products={recommendProductsToProducts(recommendationsQuery.data.products)}
           sourceContext={cartContext}
+          title={hasItems ? "Pairs well with what's in your bag" : "Worth a look while your bag is empty"}
+          subtitle={hasItems ? "Recommended" : "Curated"}
+          reason={recommendationsQuery.data.personalization_reason ?? undefined}
+          personalized={Boolean(recommendationsQuery.data.personalization_reason)}
           presentation="default"
         />
+      ) : null}
+
+      {hasItems && complementQuery.data && complementQuery.data.recommendations.length > 0 ? (
+        <ComplementRail recommendations={complementQuery.data.recommendations} />
       ) : null}
     </div>
   );

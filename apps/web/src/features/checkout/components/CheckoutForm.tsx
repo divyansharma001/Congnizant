@@ -8,8 +8,10 @@ import { z } from "zod";
 import { BagSkeleton } from "@/features/cart/components/BagSkeleton";
 import { useCartQuery, useInvalidateCart } from "@/features/cart/useCart";
 import { Context } from "@/features/events/contexts";
+import { fromCartLine, variantSnapshot } from "@/features/events/payloads";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { apiClient } from "@/shared/api/client";
 import { formatCurrency } from "@/shared/lib/format";
 import { tw } from "@/shared/ui/tw";
@@ -82,8 +84,7 @@ export function CheckoutForm() {
   const postPurchaseContext = Context.postPurchase();
   const postPurchaseQuery = useQuery({
     queryKey: ["recommend", postPurchaseContext],
-    // queryFn: () => apiClient.getRecommendation(postPurchaseContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(postPurchaseContext),
     enabled: done !== null,
   });
 
@@ -118,19 +119,41 @@ export function CheckoutForm() {
         lineTotal: line.unitPrice * line.quantity,
       }));
       const st = subtotal;
-      // Spec: emit one `purchase` event per line item so the recommender can
-      // attribute conversions to individual products (not just to the order).
-      // BE CartLine doesn't carry `category` so we pass empty — minor analytics
-      // degradation in exchange for not doing N catalog lookups at checkout.
+      const orderId = response.orderId;
+      const formValues = form.getValues();
+      // Per-line `purchase` events — the recommender attributes conversions
+      // to individual products. Each line stamps `order_id` so the worker
+      // can group lines back into one order, plus the variant the shopper
+      // picked at PDP time so per-variant conversion is observable.
       for (const line of items) {
+        const variant = variantSnapshot(line.selectedOptions ?? undefined);
         trackSpec("purchase", {
-          product_id: line.productId,
-          product_name: line.name,
-          category: "",
-          price: line.unitPrice,
+          ...fromCartLine(line),
           quantity: line.quantity,
+          line_total: line.unitPrice * line.quantity,
+          order_id: orderId,
+          ...(variant ? { variant } : {}),
         });
       }
+      // Order-level summary — fires once per checkout so the worker can
+      // compute basket size, mixed-category baskets, AOV per persona.
+      const categories = Array.from(
+        new Set(
+          items
+            .map((line) => fromCartLine(line).category)
+            .filter((c): c is string => Boolean(c)),
+        ),
+      );
+      trackSpec("order_placed", {
+        order_id: orderId,
+        subtotal: st,
+        line_count: items.length,
+        item_count: items.reduce((sum, line) => sum + line.quantity, 0),
+        payment_method: formValues.paymentMethod,
+        country: formValues.country,
+        city: formValues.city,
+        ...(categories.length > 0 ? { categories } : {}),
+      });
       // BE clears the cart on successful checkout — invalidate so the next
       // mount fetches the now-empty state. Snapshot lines + subtotal first
       // since the confirmation view renders from the snapshot, not the
@@ -204,10 +227,14 @@ export function CheckoutForm() {
           </Link>
         </div>
 
-        {postPurchaseQuery.data ? (
+        {postPurchaseQuery.data && postPurchaseQuery.data.products.length > 0 ? (
           <RecommendationRail
-            rail={postPurchaseQuery.data}
+            products={recommendProductsToProducts(postPurchaseQuery.data.products)}
             sourceContext={postPurchaseContext}
+            title="Worth considering for next time"
+            subtitle="Curated for you"
+            reason={postPurchaseQuery.data.personalization_reason ?? undefined}
+            personalized={Boolean(postPurchaseQuery.data.personalization_reason)}
             presentation="default"
           />
         ) : null}

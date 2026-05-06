@@ -12,6 +12,7 @@ import { ProductGrid } from "@/features/catalog/components/ProductGrid";
 import { Context } from "@/features/events/contexts";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
+import { recommendProductsToProducts } from "@/features/recommendations/mappers";
 import { useCatalogFacets } from "@/features/catalog/hooks/useCatalogFacets";
 import { useFacetStripBusyForScopeChange } from "../features/catalog/hooks/useFacetStripBusyForScopeChange";
 import { useProductSearch } from "@/features/catalog/hooks/useProductSearch";
@@ -64,8 +65,7 @@ export function CatalogPage() {
   const categoryContext = category ? Context.category(category) : "";
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", categoryContext],
-    // queryFn: () => apiClient.getRecommendation(categoryContext),
-    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
+    queryFn: () => apiClient.getRecommendation(categoryContext),
     enabled: categoryContext.length > 0,
   });
 
@@ -91,6 +91,7 @@ export function CatalogPage() {
       category: category || "all",
       filter_type: "sort",
       filter_value: nextSort,
+      surface: "catalog",
     });
   };
 
@@ -107,6 +108,7 @@ export function CatalogPage() {
       category: category || "all",
       filter_type: "vertical",
       filter_value: nextVertical || "all",
+      surface: "catalog",
     });
   };
 
@@ -123,6 +125,7 @@ export function CatalogPage() {
       category: category || "all",
       filter_type: "free_delivery",
       filter_value: only ? "true" : "false",
+      surface: "catalog",
     });
   };
 
@@ -224,7 +227,7 @@ export function CatalogPage() {
 
       {query.data && totalPages > 1 ? (
         <nav
-          className={`${tw.labPanel} flex flex-wrap items-center justify-center gap-4 border-t border-outline/12 pt-6 sm:pt-7`}
+          className="mt-4 flex flex-wrap items-center justify-center gap-4 border-t border-outline/15 pt-6 sm:pt-7"
           aria-label="Catalog pagination"
         >
           <button
@@ -249,10 +252,14 @@ export function CatalogPage() {
         </nav>
       ) : null}
 
-      {recommendationsQuery.data && categoryContext ? (
+      {recommendationsQuery.data && categoryContext && recommendationsQuery.data.products.length > 0 ? (
         <RecommendationRail
-          rail={recommendationsQuery.data}
+          products={recommendProductsToProducts(recommendationsQuery.data.products)}
           sourceContext={categoryContext}
+          title="Worth a closer look in this category"
+          subtitle="Recommended"
+          reason={recommendationsQuery.data.personalization_reason ?? undefined}
+          personalized={Boolean(recommendationsQuery.data.personalization_reason)}
           presentation="default"
         />
       ) : null}

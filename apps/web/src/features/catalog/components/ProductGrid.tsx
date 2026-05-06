@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 
+import { rememberProducts } from "@/features/events/payloads";
 import type { Product } from "@/shared/api/contracts";
 
 import { ProductCard } from "@/features/catalog/components/ProductCard";
@@ -72,6 +74,12 @@ function CatalogGridMotionItem({
 /** Transparent 3-up lattice + `ProductCard` — inherits parent background. */
 export function ProductGrid({ products, accent, onProductClick }: ProductGridProps) {
   const reduced = useReducedMotion() ?? false;
+  // Stamp the rich product snapshot so later remove/purchase/cart events can
+  // carry brand/rating/freeDelivery/etc. even when the cart/wishlist line
+  // itself only ships id/slug/name/image/unitPrice.
+  useEffect(() => {
+    rememberProducts(products);
+  }, [products]);
   return (
     <ul className={catalogGridShellListClass} role="list">
       {products.map((product) => (
