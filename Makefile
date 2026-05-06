@@ -50,6 +50,11 @@ seed-demo-customer:
 # One-shot: tables + indexes + all seeds.
 seed-all: setup-db setup-opensearch seed-products seed-reviews seed-demo-customer
 
+# End-to-end smoke for the 17 ecommerce endpoints. Idempotent — safe to
+# re-run against an already-seeded stack.
+smoke-ecom:
+	./scripts/smoke_ecom.sh
+
 # usage: make scan-vectors COLL=customer-facts CUST=cust_1
 # CUST is optional; omit it to scan everything in the collection
 scan-vectors:
